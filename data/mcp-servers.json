@@ -1,0 +1,38 @@
+{
+  "servers": {
+    "filesystem": {
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/app/workspaces"],
+      "env": {},
+      "description": "Acesso ao sistema de arquivos externo (fora do workspace)"
+    },
+    "postgres": {
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgres://user:password@localhost:5432/mydb"],
+      "env": {},
+      "description": "Banco de dados PostgreSQL — consultas e modificações"
+    },
+    "browser": {
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/mcp-server-puppeteer"],
+      "env": {},
+      "description": "Navegador web (Puppeteer) para pesquisas e testes de UI"
+    },
+    "github": {
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": ""
+      },
+      "description": "GitHub API — repos, issues, pull requests"
+    }
+  }
+}

@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — IDE Agêntica</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f0f13; --bg2: #16161e; --bg3: #1e1e2e;
+      --border: #2a2a3e; --primary: #7c3aed; --accent: #06b6d4;
+      --text: #e2e8f0; --text-muted: #64748b; --danger: #ef4444;
+      --success: #10b981; --warning: #f59e0b;
+    }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; min-height: 100vh; }
+
+    .topbar {
+      background: var(--bg2); border-bottom: 1px solid var(--border);
+      padding: 0 24px; height: 56px;
+      display: flex; align-items: center; justify-content: space-between;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .topbar-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
+    .topbar-brand span { font-size: 20px; }
+    .badge { background: var(--primary); color: white; font-size: 10px; padding: 2px 8px; border-radius: 100px; font-weight: 600; }
+    .btn-logout { background: transparent; border: 1px solid var(--border); color: var(--text-muted); padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; transition: 0.2s; }
+    .btn-logout:hover { border-color: var(--danger); color: var(--danger); }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 32px 24px; }
+
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 32px; }
+    .stat-card {
+      background: var(--bg2); border: 1px solid var(--border); border-radius: 12px;
+      padding: 20px; display: flex; flex-direction: column; gap: 6px;
+    }
+    .stat-label { font-size: 12px; color: var(--text-muted); font-weight: 500; }
+    .stat-value { font-size: 32px; font-weight: 700; }
+    .stat-value.purple { color: #a78bfa; }
+    .stat-value.cyan { color: var(--accent); }
+    .stat-value.green { color: var(--success); }
+    .stat-value.orange { color: var(--warning); }
+
+    .section { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 24px; }
+    .section-header {
+      padding: 16px 20px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .section-title { font-size: 14px; font-weight: 600; }
+
+    .btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; font-family: 'Inter', sans-serif; transition: 0.2s; }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { opacity: 0.85; }
+    .btn-danger { background: rgba(239,68,68,0.1); color: #fca5a5; border: 1px solid rgba(239,68,68,0.2); }
+    .btn-danger:hover { background: rgba(239,68,68,0.2); }
+    .btn-sm { padding: 4px 10px; font-size: 12px; }
+    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-muted); }
+    .btn-ghost:hover { border-color: var(--primary); color: var(--primary); }
+
+    table { width: 100%; border-collapse: collapse; }
+    th { padding: 12px 16px; text-align: left; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border); }
+    td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid rgba(42,42,62,0.5); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(124,58,237,0.04); }
+
+    .user-info { display: flex; align-items: center; gap: 10px; }
+    .avatar { width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, var(--primary), var(--accent)); display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: white; flex-shrink: 0; }
+
+    .plan-badge { padding: 2px 8px; border-radius: 100px; font-size: 11px; font-weight: 600; display: inline-block; }
+    .plan-starter { background: rgba(100,116,139,0.15); color: #94a3b8; }
+    .plan-pro { background: rgba(124,58,237,0.15); color: #a78bfa; }
+    .plan-unlimited { background: rgba(6,182,212,0.15); color: var(--accent); }
+    .plan-admin { background: rgba(245,158,11,0.15); color: var(--warning); }
+
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .status-active { background: var(--success); }
+    .status-inactive { background: var(--danger); }
+
+    .actions { display: flex; gap: 6px; }
+
+    /* Modal */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); z-index: 1000; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: var(--bg2); border: 1px solid var(--border); border-radius: 16px; padding: 28px; width: 420px; max-width: 90vw; }
+    .modal h3 { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
+
+    .form-row { margin-bottom: 16px; }
+    .form-row label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; }
+    .form-row input, .form-row select {
+      width: 100%; padding: 10px 14px; background: var(--bg3); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text); font-size: 13px; font-family: 'Inter', sans-serif; outline: none;
+    }
+    .form-row input:focus, .form-row select:focus { border-color: var(--primary); }
+
+    .alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; display: none; }
+    .alert-error { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); color: #fca5a5; }
+    .alert-success { background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); color: #6ee7b7; }
+
+    .empty-state { text-align: center; padding: 48px; color: var(--text-muted); font-size: 14px; }
+
+    select option { background: var(--bg3); }
+  </style>
+</head>
+<body>
+  <nav class="topbar">
+    <div class="topbar-brand">
+      <span>🤖</span>
+      IDE Agêntica
+      <span class="badge">ADMIN</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span id="admin-name" style="font-size:13px;color:var(--text-muted)"></span>
+      <a href="/" style="color:var(--text-muted);font-size:13px;text-decoration:none;">← Voltar à IDE</a>
+      <button class="btn-logout" onclick="logout()">Sair</button>
+    </div>
+  </nav>
+
+  <div class="container">
+    <h1 style="font-size:24px;font-weight:700;margin-bottom:8px;">Painel Administrativo</h1>
+    <p style="color:var(--text-muted);font-size:14px;margin-bottom:28px;">Gerencie usuários e monitore o sistema</p>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <span class="stat-label">Total de Usuários</span>
+        <span class="stat-value purple" id="stat-total">—</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Usuários Ativos</span>
+        <span class="stat-value green" id="stat-active">—</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Plano Starter</span>
+        <span class="stat-value" id="stat-starter" style="color:#94a3b8;">—</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Plano Pro</span>
+        <span class="stat-value purple" id="stat-pro">—</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-label">Plano Unlimited</span>
+        <span class="stat-value cyan" id="stat-unlimited">—</span>
+      </div>
+    </div>
+
+    <!-- Users Table -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">👥 Usuários</span>
+        <button class="btn btn-primary" onclick="openCreateModal()">+ Novo Usuário</button>
+      </div>
+      <div id="users-error" class="alert alert-error" style="margin:16px;"></div>
+      <table>
+        <thead>
+          <tr>
+            <th>Usuário</th>
+            <th>Email</th>
+            <th>Plano</th>
+            <th>Status</th>
+            <th>Criado em</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="users-tbody">
+          <tr><td colspan="6" class="empty-state">Carregando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- MCP Servers -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">🔌 MCP Servers (Model Context Protocol)</span>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-ghost btn-sm" onclick="connectAllMcp()">⚡ Conectar Todos</button>
+          <button class="btn btn-primary" onclick="openMcpModal()">+ Novo Servidor</button>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Servidor</th>
+            <th>Transporte</th>
+            <th>Comando</th>
+            <th>Status</th>
+            <th>Tools</th>
+            <th>Ações</th>
+          </tr>
+        </thead>
+        <tbody id="mcp-tbody">
+          <tr><td colspan="6" class="empty-state">Carregando...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Modal: Criar Usuário -->
+  <div class="modal-overlay" id="modal-create">
+    <div class="modal">
+      <h3>➕ Novo Usuário</h3>
+      <div class="alert alert-error" id="create-error"></div>
+      <div class="alert alert-success" id="create-success"></div>
+      <div class="form-row">
+        <label>Nome completo *</label>
+        <input type="text" id="new-name" placeholder="João Silva">
+      </div>
+      <div class="form-row">
+        <label>Email *</label>
+        <input type="email" id="new-email" placeholder="joao@email.com">
+      </div>
+      <div class="form-row">
+        <label>Senha *</label>
+        <input type="password" id="new-password" placeholder="Mínimo 6 caracteres">
+      </div>
+      <div class="form-row">
+        <label>Plano</label>
+        <select id="new-plan">
+          <option value="starter">Starter</option>
+          <option value="pro">Pro</option>
+          <option value="unlimited">Unlimited</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Função</label>
+        <select id="new-role">
+          <option value="user">Usuário</option>
+          <option value="admin">Administrador</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal('modal-create')">Cancelar</button>
+        <button class="btn btn-primary" onclick="createUser()">Criar Usuário</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Editar Usuário -->
+  <div class="modal-overlay" id="modal-edit">
+    <div class="modal">
+      <h3>✏️ Editar Usuário</h3>
+      <div class="alert alert-error" id="edit-error"></div>
+      <input type="hidden" id="edit-id">
+      <div class="form-row">
+        <label>Nome</label>
+        <input type="text" id="edit-name">
+      </div>
+      <div class="form-row">
+        <label>Plano</label>
+        <select id="edit-plan">
+          <option value="starter">Starter</option>
+          <option value="pro">Pro</option>
+          <option value="unlimited">Unlimited</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Função</label>
+        <select id="edit-role">
+          <option value="user">Usuário</option>
+          <option value="admin">Administrador</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Status</label>
+        <select id="edit-active">
+          <option value="1">Ativo</option>
+          <option value="0">Desativado</option>
+        </select>
+      </div>
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+        <div class="form-row">
+          <label>Nova Senha (deixe em branco para não alterar)</label>
+          <input type="password" id="edit-password" placeholder="••••••">
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal('modal-edit')">Cancelar</button>
+        <button class="btn btn-primary" onclick="saveUser()">Salvar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Novo Servidor MCP -->
+  <div class="modal-overlay" id="modal-mcp">
+    <div class="modal">
+      <h3>🔌 Novo Servidor MCP</h3>
+      <div class="alert alert-error" id="mcp-error"></div>
+      <div class="alert alert-success" id="mcp-success"></div>
+      <div class="form-row">
+        <label>Nome (identificador único) *</label>
+        <input type="text" id="mcp-name" placeholder="postgres, browser, github...">
+      </div>
+      <div class="form-row">
+        <label>Comando *</label>
+        <input type="text" id="mcp-command" placeholder="npx">
+      </div>
+      <div class="form-row">
+        <label>Argumentos (separados por vírgula)</label>
+        <input type="text" id="mcp-args" placeholder="-y, @modelcontextprotocol/server-postgres, postgres://...">
+      </div>
+      <div class="form-row">
+        <label>Variáveis de Ambiente (JSON)</label>
+        <input type="text" id="mcp-env" placeholder='{"GITHUB_TOKEN": "ghp_..."}'>
+      </div>
+      <div class="form-row">
+        <label>Descrição</label>
+        <input type="text" id="mcp-desc" placeholder="Banco de dados PostgreSQL">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeModal('modal-mcp')">Cancelar</button>
+        <button class="btn btn-primary" onclick="createMcpServer()">Adicionar Servidor</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentUsers = [];
+
+    async function loadStats() {
+      const res = await fetch('/api/admin/stats', { credentials: 'include' });
+      const s = await res.json();
+      document.getElementById('stat-total').textContent = s.totalUsers;
+      document.getElementById('stat-active').textContent = s.activeUsers;
+      document.getElementById('stat-starter').textContent = s.starterPlan;
+      document.getElementById('stat-pro').textContent = s.proPlan;
+      document.getElementById('stat-unlimited').textContent = s.unlimitedPlan;
+    }
+
+    async function loadUsers() {
+      const res = await fetch('/api/admin/users', { credentials: 'include' });
+      if (res.status === 401 || res.status === 403) { window.location.href = '/login'; return; }
+      currentUsers = await res.json();
+      renderUsers();
+    }
+
+    function renderUsers() {
+      const tbody = document.getElementById('users-tbody');
+      if (!currentUsers.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Nenhum usuário encontrado</td></tr>';
+        return;
+      }
+      tbody.innerHTML = currentUsers.map(u => `
+        <tr>
+          <td>
+            <div class="user-info">
+              <div class="avatar">${u.name.charAt(0).toUpperCase()}</div>
+              <span>${u.name}</span>
+            </div>
+          </td>
+          <td style="color:var(--text-muted)">${u.email}</td>
+          <td><span class="plan-badge plan-${u.role === 'admin' ? 'admin' : u.plan}">${u.role === 'admin' ? 'Admin' : u.plan}</span></td>
+          <td>
+            <span class="status-dot status-${u.active ? 'active' : 'inactive'}"></span>
+            ${u.active ? 'Ativo' : 'Inativo'}
+          </td>
+          <td style="color:var(--text-muted)">${new Date(u.created_at).toLocaleDateString('pt-BR')}</td>
+          <td>
+            <div class="actions">
+              <button class="btn btn-sm btn-ghost" onclick="openEditModal('${u.id}')">Editar</button>
+              <button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}', '${u.name}')">Deletar</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function openCreateModal() {
+      document.getElementById('new-name').value = '';
+      document.getElementById('new-email').value = '';
+      document.getElementById('new-password').value = '';
+      document.getElementById('new-plan').value = 'starter';
+      document.getElementById('new-role').value = 'user';
+      document.getElementById('create-error').style.display = 'none';
+      document.getElementById('create-success').style.display = 'none';
+      document.getElementById('modal-create').classList.add('open');
+    }
+
+    function openEditModal(id) {
+      const u = currentUsers.find(u => u.id === id);
+      if (!u) return;
+      document.getElementById('edit-id').value = u.id;
+      document.getElementById('edit-name').value = u.name;
+      document.getElementById('edit-plan').value = u.plan;
+      document.getElementById('edit-role').value = u.role;
+      document.getElementById('edit-active').value = u.active ? '1' : '0';
+      document.getElementById('edit-password').value = '';
+      document.getElementById('edit-error').style.display = 'none';
+      document.getElementById('modal-edit').classList.add('open');
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).classList.remove('open');
+    }
+
+    async function createUser() {
+      const name = document.getElementById('new-name').value.trim();
+      const email = document.getElementById('new-email').value.trim();
+      const password = document.getElementById('new-password').value;
+      const plan = document.getElementById('new-plan').value;
+      const role = document.getElementById('new-role').value;
+      const errEl = document.getElementById('create-error');
+      const okEl = document.getElementById('create-success');
+
+      if (!name || !email || !password) {
+        errEl.textContent = 'Preencha todos os campos obrigatórios';
+        errEl.style.display = 'block';
+        return;
+      }
+
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ name, email, password, plan, role })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        okEl.textContent = `Usuário "${name}" criado com sucesso!`;
+        okEl.style.display = 'block';
+        errEl.style.display = 'none';
+        loadUsers();
+        loadStats();
+        setTimeout(() => closeModal('modal-create'), 1500);
+      } else {
+        errEl.textContent = data.error || 'Erro ao criar usuário';
+        errEl.style.display = 'block';
+        okEl.style.display = 'none';
+      }
+    }
+
+    async function saveUser() {
+      const id = document.getElementById('edit-id').value;
+      const name = document.getElementById('edit-name').value.trim();
+      const plan = document.getElementById('edit-plan').value;
+      const role = document.getElementById('edit-role').value;
+      const active = document.getElementById('edit-active').value === '1';
+      const password = document.getElementById('edit-password').value;
+      const errEl = document.getElementById('edit-error');
+
+      const res = await fetch(`/api/admin/users/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ name, plan, role, active })
+      });
+
+      if (!res.ok) {
+        errEl.textContent = 'Erro ao salvar';
+        errEl.style.display = 'block';
+        return;
+      }
+
+      if (password) {
+        await fetch(`/api/admin/users/${id}/password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ password })
+        });
+      }
+
+      closeModal('modal-edit');
+      loadUsers();
+      loadStats();
+    }
+
+    async function deleteUser(id, name) {
+      if (!confirm(`Tem certeza que quer deletar "${name}"? Esta ação é irreversível e apaga todos os arquivos do usuário.`)) return;
+      const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE', credentials: 'include' });
+      if (res.ok) { loadUsers(); loadStats(); }
+      else { const d = await res.json(); alert(d.error); }
+    }
+
+    async function logout() {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      window.location.href = '/login';
+    }
+
+    // Close modal on overlay click
+    document.querySelectorAll('.modal-overlay').forEach(el => {
+      el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open'); });
+    });
+
+    // Load admin name
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then(r => r.json())
+      .then(u => {
+        document.getElementById('admin-name').textContent = u.name;
+        if (u.role !== 'admin') window.location.href = '/';
+      })
+      .catch(() => window.location.href = '/login');
+
+    // Init
+    loadStats();
+    loadUsers();
+    loadMcpServers();
+
+    // ── MCP Servers ──────────────────────────────────────────────────
+    async function loadMcpServers() {
+      try {
+        const res = await fetch('/api/mcp/servers', { credentials: 'include' });
+        const servers = await res.json();
+        renderMcpServers(servers);
+      } catch (e) {
+        document.getElementById('mcp-tbody').innerHTML = '<tr><td colspan="6" class="empty-state">Erro ao carregar servidores MCP</td></tr>';
+      }
+    }
+
+    function renderMcpServers(servers) {
+      const tbody = document.getElementById('mcp-tbody');
+      const entries = Object.entries(servers);
+      if (entries.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">Nenhum servidor MCP configurado. Clique em "+ Novo Servidor" para adicionar.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = entries.map(([name, s]) => {
+        const statusClass = s.connected ? 'active' : (s.enabled ? 'inactive' : 'inactive');
+        const statusText = s.connected ? 'Conectado' : (s.enabled ? 'Desconectado' : 'Desativado');
+        const cmdText = `${s.command || ''} ${(s.args || []).join(' ')}`.substring(0, 50);
+        return `
+          <tr>
+            <td>
+              <div style="font-weight:600;">${name}</div>
+              <div style="font-size:11px;color:var(--text-muted);">${s.description || ''}</div>
+            </td>
+            <td><span class="plan-badge plan-starter">${s.transport || 'stdio'}</span></td>
+            <td style="font-family:monospace;font-size:12px;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${cmdText}">${cmdText}</td>
+            <td>
+              <span class="status-dot status-${statusClass}"></span>
+              ${statusText}
+              ${s.connected ? '<span style="font-size:10px;color:var(--success);margin-left:4px;">✓</span>' : ''}
+            </td>
+            <td>${s.toolCount || 0}</td>
+            <td>
+              <div class="actions">
+                <button class="btn btn-sm ${s.enabled ? 'btn-ghost' : 'btn-primary'}" onclick="toggleMcp('${name}')">${s.enabled ? 'Desativar' : 'Ativar'}</button>
+                <button class="btn btn-sm btn-ghost" onclick="testMcp('${name}')">Testar</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteMcp('${name}')">🗑️</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function openMcpModal() {
+      document.getElementById('mcp-name').value = '';
+      document.getElementById('mcp-command').value = 'npx';
+      document.getElementById('mcp-args').value = '';
+      document.getElementById('mcp-env').value = '';
+      document.getElementById('mcp-desc').value = '';
+      document.getElementById('mcp-error').style.display = 'none';
+      document.getElementById('mcp-success').style.display = 'none';
+      document.getElementById('modal-mcp').classList.add('open');
+    }
+
+    async function createMcpServer() {
+      const name = document.getElementById('mcp-name').value.trim();
+      const command = document.getElementById('mcp-command').value.trim();
+      const argsRaw = document.getElementById('mcp-args').value.trim();
+      const envRaw = document.getElementById('mcp-env').value.trim();
+      const description = document.getElementById('mcp-desc').value.trim();
+      const errEl = document.getElementById('mcp-error');
+      const okEl = document.getElementById('mcp-success');
+
+      if (!name || !command) {
+        errEl.textContent = 'Nome e Comando são obrigatórios';
+        errEl.style.display = 'block';
+        return;
+      }
+
+      const args = argsRaw ? argsRaw.split(',').map(a => a.trim()).filter(Boolean) : [];
+      let env = {};
+      if (envRaw) {
+        try { env = JSON.parse(envRaw); } catch (e) {
+          errEl.textContent = 'JSON de variáveis de ambiente inválido';
+          errEl.style.display = 'block';
+          return;
+        }
+      }
+
+      const res = await fetch('/api/mcp/servers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ name, command, args, env, description, transport: 'stdio' })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        okEl.textContent = `Servidor "${name}" adicionado!`;
+        okEl.style.display = 'block';
+        errEl.style.display = 'none';
+        loadMcpServers();
+        setTimeout(() => closeModal('modal-mcp'), 1200);
+      } else {
+        errEl.textContent = data.error || 'Erro ao criar servidor';
+        errEl.style.display = 'block';
+        okEl.style.display = 'none';
+      }
+    }
+
+    async function toggleMcp(name) {
+      const res = await fetch(`/api/mcp/servers/${name}/toggle`, { method: 'POST', credentials: 'include' });
+      const data = await res.json();
+      if (data.error && !data.success) {
+        alert(`Erro: ${data.error}`);
+      } else if (data.error) {
+        alert(`Servidor ativado mas não conseguiu conectar: ${data.error}`);
+      }
+      loadMcpServers();
+    }
+
+    async function testMcp(name) {
+      const btn = event.target;
+      btn.textContent = '⏳...';
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/mcp/servers/${name}/test`, { method: 'POST', credentials: 'include' });
+        const data = await res.json();
+        if (data.success) {
+          alert(`✅ Conexão OK!\n\n${data.tools} ferramentas encontradas:\n${data.toolList.map(t => `• ${t.name}: ${t.description}`).join('\n')}`);
+        } else {
+          alert(`❌ Falha na conexão:\n${data.error}`);
+        }
+      } catch (e) {
+        alert(`❌ Erro: ${e.message}`);
+      }
+      btn.textContent = 'Testar';
+      btn.disabled = false;
+      loadMcpServers();
+    }
+
+    async function deleteMcp(name) {
+      if (!confirm(`Remover servidor MCP "${name}"?`)) return;
+      await fetch(`/api/mcp/servers/${name}`, { method: 'DELETE', credentials: 'include' });
+      loadMcpServers();
+    }
+
+    async function connectAllMcp() {
+      const btn = event.target;
+      btn.textContent = '⏳ Conectando...';
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/mcp/connect-all', { method: 'POST', credentials: 'include' });
+        const data = await res.json();
+        if (data.success) {
+          const summary = Object.entries(data.results).map(([n, r]) => `${n}: ${r.status}`).join('\n');
+          alert(`Resultado:\n${summary}`);
+        }
+      } catch (e) {
+        alert(`Erro: ${e.message}`);
+      }
+      btn.textContent = '⚡ Conectar Todos';
+      btn.disabled = false;
+      loadMcpServers();
+    }
+  </script>
+</body>
+</html>

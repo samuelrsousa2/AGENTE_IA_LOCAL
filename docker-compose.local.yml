@@ -1,0 +1,28 @@
+# ==========================================================================
+# docker-compose.local.yml — Para rodar localmente no Windows
+# Usa o Ollama que já está rodando no host (sem subir container de Ollama)
+# Uso: docker compose -f docker-compose.local.yml up --build
+# ==========================================================================
+services:
+  ide:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ide-agente
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # Dados persistentes fora do container
+      - ./workspaces:/workspaces
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - WORKSPACES_DIR=/workspaces
+      - DB_PATH=/app/data/ide.db
+      # Ollama rodando no host Windows — host.docker.internal resolve para o host
+      - OLLAMA_URL=http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

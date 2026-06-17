@@ -1,0 +1,46 @@
+# ==========================================================================
+# docker-compose.dev.yml — Desenvolvimento local (sem GPU, sem Nginx)
+# Uso: docker compose -f docker-compose.dev.yml up
+# ==========================================================================
+version: '3.8'
+
+services:
+  ide:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ide-agente-dev
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+      - "3001-3020:3001-3020"
+    volumes:
+      - ./workspace:/workspace
+      - ./public:/app/public        # Hot reload dos arquivos estáticos
+      - ./server.js:/app/server.js  # Hot reload do servidor
+      - ./agent.js:/app/agent.js
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - WORKSPACE_DIR=/workspace
+      - OLLAMA_URL=http://host.docker.internal:11434  # Ollama rodando no host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - ide-dev-network
+
+  # Ollama no dev — usa o que já está rodando no host (sem container)
+  # Se quiser olama em container: descomente abaixo
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   networks:
+  #     - ide-dev-network
+
+networks:
+  ide-dev-network:
+    driver: bridge

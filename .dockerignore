@@ -1,0 +1,12 @@
+node_modules/
+npm-debug.log*
+.env
+.env.*
+*.log
+workspaces/
+workspace/
+data/
+.git/
+*.zip
+ssl/
+auth/google.js

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>IDE Agêntica</title>
+
+  <!-- Fontes -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- CSS -->
+  <link rel="stylesheet" href="style.css">
+
+  <!-- xterm.js (versão testada) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+</head>
+
+<body class="dark-theme">
+  <div class="ide-container">
+
+    <!-- ============= FILE EXPLORER ============= -->
+    <aside class="file-explorer" id="file-explorer">
+      <div class="explorer-header">
+        <div class="explorer-title">
+          <span>📁 EXPLORADOR</span>
+        </div>
+        <div class="explorer-actions">
+          <button class="icon-btn" id="btn-new-file" title="Novo Arquivo">+📄</button>
+          <button class="icon-btn" id="btn-new-folder" title="Nova Pasta">+📁</button>
+          <button class="icon-btn" id="btn-refresh-tree" title="Atualizar">🔄</button>
+        </div>
+      </div>
+
+      <!-- Barra de Rodar Projeto -->
+      <div id="project-runner-bar" style="padding:6px 8px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <button id="btn-run-project" title="Detecta e roda o projeto automaticamente"
+          style="flex:1;background:linear-gradient(135deg,#16a34a,#15803d);color:white;border:none;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;transition:opacity .2s;">
+          ▶ Rodar Projeto
+        </button>
+        <button id="btn-stop-project" title="Parar servidor"
+          style="background:rgba(239,68,68,0.15);color:#f87171;border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:5px 8px;font-size:11px;cursor:pointer;display:none;">
+          ⏹
+        </button>
+        <div id="project-status-bar" style="width:100%;font-size:10px;color:var(--text-dim);display:none;align-items:center;gap:5px;">
+          <span id="project-status-dot" style="width:7px;height:7px;border-radius:50%;background:#22c55e;display:inline-block;animation:pulse-queue 1.5s infinite;"></span>
+          <a id="project-status-link" href="#" target="_blank" style="color:#34d399;text-decoration:none;font-weight:600;"></a>
+          <span id="project-status-cmd" style="color:var(--text-dim);"></span>
+        </div>
+      </div>
+
+      <div class="file-tree" id="file-tree"></div>
+
+      <!-- Git Panel -->
+      <div class="git-panel" id="git-panel">
+        <div class="explorer-header" style="cursor:pointer;" id="git-toggle-header">
+          <div class="explorer-title"><span>🔀 GIT / GITHUB</span></div>
+          <span class="git-toggle-arrow">▸</span>
+        </div>
+        <div class="git-body" id="git-body" style="display:none;">
+          <!-- GitHub Connection -->
+          <div class="git-section" id="github-connect-section">
+            <button class="git-btn github-connect-btn" id="btn-github-connect">🔗 Conectar GitHub</button>
+          </div>
+          <div class="git-section" id="github-connected-section" style="display:none;">
+            <div class="github-user" id="github-user-info">
+              <span>✅ <strong id="github-username"></strong></span>
+              <button class="icon-btn" id="btn-github-disconnect" title="Desconectar" style="font-size:10px;">✕</button>
+            </div>
+          </div>
+
+          <!-- Git Status -->
+          <div class="git-section">
+            <div class="git-branch" id="git-branch">📌 Branch: <strong>—</strong></div>
+          </div>
+
+          <!-- Git Actions -->
+          <div class="git-actions">
+            <button class="git-btn" id="btn-git-init" title="Inicializar Git">🔧 Init</button>
+            <button class="git-btn" id="btn-git-add" title="git add .">➕ Add All</button>
+            <button class="git-btn" id="btn-git-commit" title="Commit">💾 Commit</button>
+            <button class="git-btn" id="btn-git-push" title="Push">⬆️ Push</button>
+            <button class="git-btn" id="btn-git-pull" title="Pull">⬇️ Pull</button>
+          </div>
+
+          <!-- Changed Files -->
+          <div class="git-section">
+            <div class="git-files-header">Alterações:</div>
+            <div class="git-files-list" id="git-files-list">
+              <div style="color:var(--text-dim);font-size:11px;padding:4px 0;">Nenhuma alteração</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Resize handle -->
+    <div class="resize-handle vertical" id="resize-explorer"></div>
+
+    <!-- ============= CENTRO: Editor + Terminal ============= -->
+    <main class="center-panel" id="center-panel">
+      <div class="tab-bar" id="tab-bar">
+        <div class="tabs-scroll" id="tabs-scroll">
+          <div class="tab-placeholder">Abra um arquivo no explorador</div>
+        </div>
+        <button class="icon-btn preview-btn" id="btn-preview" title="Preview (HTML)" style="display:none;">👁️ Preview</button>
+      </div>
+      <!-- Editor + Preview wrapper -->
+      <div class="editor-preview-wrapper" id="editor-preview-wrapper">
+        <div class="editor-area" id="editor-area">
+          <div class="editor-welcome" id="editor-welcome">
+            <h2>🤖 Meu Agente de IA</h2>
+            <p>Abra um arquivo ou peça ao agente para criar um projeto.</p>
+            <div class="shortcut-hints">
+              <div class="shortcut"><kbd>Ctrl</kbd>+<kbd>S</kbd> Salvar</div>
+              <div class="shortcut"><kbd>Ctrl</kbd>+<kbd>`</kbd> Terminal</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Preview iframe (hidden by default) -->
+        <div class="preview-area" id="preview-area" style="display:none;">
+          <div class="preview-header">
+            <span>👁️ PREVIEW</span>
+            <div>
+              <button class="icon-btn" id="btn-preview-refresh" title="Recarregar">🔄</button>
+              <button class="icon-btn" id="btn-preview-open" title="Abrir em nova aba">🔗</button>
+              <button class="icon-btn" id="btn-preview-close" title="Fechar Preview">✕</button>
+            </div>
+          </div>
+          <iframe id="preview-iframe" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+        </div>
+      </div>
+
+      <div class="resize-handle horizontal" id="resize-terminal"></div>
+
+      <div class="terminal-area" id="terminal-area">
+        <div class="terminal-header">
+          <div class="terminal-title">⚡ TERMINAL</div>
+          <div class="terminal-actions">
+            <button class="icon-btn" id="btn-clear-terminal" title="Limpar">🗑️</button>
+            <button class="icon-btn" id="btn-toggle-terminal" title="Minimizar">➖</button>
+          </div>
+        </div>
+        <div class="terminal-container" id="terminal-container"></div>
+      </div>
+    </main>
+
+    <!-- Resize handle -->
+    <div class="resize-handle vertical" id="resize-chat"></div>
+
+    <!-- ============= CHAT / AGENTE IA ============= -->
+    <aside class="chat-panel" id="chat-panel">
+      <div class="chat-header">
+        <div class="chat-header-left">
+          <span class="chat-title">🤖 Agente IA</span>
+        </div>
+        <div class="chat-header-right">
+          <select id="model-select" title="Modelo">
+            <option value="" disabled selected>Carregando...</option>
+          </select>
+          <button class="icon-btn" id="btn-new-chat" title="Novo Chat">➕</button>
+          <button class="icon-btn" id="btn-admin" title="Painel Admin" style="display:none;font-size:11px;" onclick="window.open('/admin','_blank')">⚙️</button>
+          <div id="user-badge" class="user-badge" title=""></div>
+          <button class="icon-btn" title="Sair" onclick="logoutUser()" style="font-size:10px;color:var(--text-muted);">↪</button>
+        </div>
+      </div>
+
+      <div class="chat-messages" id="chat-messages">
+        <div class="chat-welcome" id="chat-welcome">
+          <h3>🚀 Como posso ajudar?</h3>
+          <p>Peça-me para criar projetos, editar código ou rodar comandos.</p>
+          <div class="quick-prompts">
+            <button class="quick-prompt" data-prompt="Crie um projeto Node.js com Express que responde Hello World na rota principal.">
+              🚀 Criar projeto Express
+            </button>
+            <button class="quick-prompt" data-prompt="Crie uma pagina HTML bonita com CSS animado que mostra um relogio digital em tempo real.">
+              🎨 Página com relógio
+            </button>
+            <button class="quick-prompt" data-prompt="Liste os arquivos do workspace e me diga o que tem aqui.">
+              📁 Explorar workspace
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat-input-area">
+        <div class="chat-input-container">
+          <textarea id="chat-input" placeholder="Peça algo ao agente..." rows="1"></textarea>
+          <button id="btn-send" class="icon-btn btn-send" title="Enviar" disabled>▶</button>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Mobile Bottom Bar -->
+  <nav class="mobile-bar" id="mobile-bar">
+    <button class="mobile-tab active" data-panel="file-explorer">📁 Arquivos</button>
+    <button class="mobile-tab" data-panel="center-panel">💻 Editor</button>
+    <button class="mobile-tab" data-panel="chat-panel">🤖 Agente</button>
+  </nav>
+
+  <!-- Auth check: redireciona para login se não autenticado -->
+  <script>
+    (function() {
+      // Verifica auth antes de carregar a IDE
+      fetch('/api/auth/me', { credentials: 'include' })
+        .then(r => {
+          if (!r.ok) { window.location.href = '/login'; return null; }
+          return r.json();
+        })
+        .then(user => {
+          if (!user) return;
+          // Exibir nome do usuário no header
+          const userBadge = document.getElementById('user-badge');
+          if (userBadge) {
+            userBadge.textContent = user.name.split(' ')[0];
+            userBadge.title = user.email + ' · Plano ' + user.plan;
+          }
+          const planBadge = document.getElementById('plan-badge');
+          if (planBadge) planBadge.textContent = user.plan;
+          // Mostrar link admin se for admin
+          if (user.role === 'admin') {
+            const adminBtn = document.getElementById('btn-admin');
+            if (adminBtn) adminBtn.style.display = 'flex';
+          }
+          // Salvar user info globalmente
+          window.currentUser = user;
+        })
+        .catch(() => { window.location.href = '/login'; });
+    })();
+
+    async function logoutUser() {
+      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+      window.location.href = '/login';
+    }
+  </script>
+
+  <!-- Scripts: socket.io e marked ANTES do Monaco (que define AMD loader) -->
+  <script src="/socket.io/socket.io.js"></script>
+  <!-- Socket.IO com auth JWT via cookie -->
+  <script>
+    // Patch: inicializa io() com token do cookie para auth no servidor
+    const _origIo = window.io;
+    window.io = function(opts) {
+      const token = document.cookie.match(/ide_token=([^;]+)/);
+      return _origIo(Object.assign({ auth: { token: token ? token[1] : '' } }, opts || {}));
+    };
+    Object.assign(window.io, _origIo);
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+  
+  <script src="ide.js"></script>
+  <script src="app.js"></script>
+  <script src="git.js"></script>
+</body>
+
+</html>
