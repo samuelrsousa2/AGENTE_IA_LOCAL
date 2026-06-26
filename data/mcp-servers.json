@@ -1,34 +1,48 @@
 {
   "servers": {
     "filesystem": {
-      "enabled": false,
+      "enabled": true,
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/app/workspaces"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/workspaces"
+      ],
       "env": {},
       "description": "Acesso ao sistema de arquivos externo (fora do workspace)"
     },
     "postgres": {
-      "enabled": false,
+      "enabled": true,
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgres://user:password@localhost:5432/mydb"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgres://user:password@localhost:5432/mydb"
+      ],
       "env": {},
       "description": "Banco de dados PostgreSQL — consultas e modificações"
     },
     "browser": {
-      "enabled": false,
+      "enabled": true,
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-server-puppeteer"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-puppeteer"
+      ],
       "env": {},
       "description": "Navegador web (Puppeteer) para pesquisas e testes de UI"
     },
     "github": {
-      "enabled": false,
+      "enabled": true,
       "transport": "stdio",
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
       "env": {
         "GITHUB_TOKEN": ""
       },

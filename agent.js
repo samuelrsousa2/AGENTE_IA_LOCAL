@@ -83,7 +83,7 @@ const TOOLS_DEFINITION = [
         type: 'object',
         properties: {
           command: { type: 'string', description: 'Command to run in background (e.g. "node server.js", "ts-node src/index.ts")' },
-          port: { type: 'number', description: 'Port the server listens on (e.g. 3001). Must be between 3001 and 3005.' },
+          port: { type: 'number', description: 'Port the server listens on (e.g. 3001, 4000, 8000). Use the port requested by the user, or 3001 by default.' },
           wait_seconds: { type: 'number', description: 'Seconds to wait for server to start (default 3)' }
         },
         required: ['command', 'port']
@@ -219,6 +219,13 @@ const AGENT_SYSTEM_PROMPT = `You are an elite autonomous software engineer AI. Y
 - DO NOT say "you can do X" — DO IT YOURSELF
 - DO NOT show code examples without saving them as files
 - If something is unclear, make a reasonable assumption and proceed
+
+### 1.5. FILE AND TOOL ACCESS
+- You DO have access to the user's local workspace.
+- NEVER say "I don't have access to this file".
+- ALWAYS use the \`read_file\` tool to read files instead of asking the user to provide them.
+- ALWAYS use the \`list_files\` tool to explore the directory structure.
+- CRITICAL: If you output code in markdown blocks instead of using tools, you MUST put the exact file path as a comment on the VERY FIRST LINE of the code block. (e.g. \`// src/server.js\` or \`<!-- public/login.html -->\` or \`# setup.sh\`).
 
 ### 2. AUTONOMOUS WORKFLOW — FOLLOW THIS EVERY TIME
 1. list_files(".") — survey the workspace
@@ -372,7 +379,11 @@ When asked for a complete app (any tech), create:
 - When you encounter an error you don't recognize, SEARCH FOR IT before guessing a fix.
 - When the user asks about a technology you're unsure about, SEARCH before responding.
 - Format search results clearly for the user, citing your sources.
-- NEVER say "I don't have access to real-time data" — you DO have access via web_search!`;
+- NEVER say "I don't have access to real-time data" — you DO have access via web_search!
+
+### 13. GENERATION LIMITS
+- Write your code or response ONCE. Do NOT repeat or loop the same code blocks.
+- When your task is done, STOP generating text immediately. Do NOT start over.`;
 
 
 // ==========================================================================
@@ -833,7 +844,12 @@ function parseCodeBlocksFromResponse(content, workspacePath, socket, iteration =
     const fileNameMatch = textBefore.match(/[`"']?([\w][\w.\-/]*\.\w{1,5})[`"']?[\s:]*$/m) ||
                           textBefore.match(/(?:arquivo|file|crie?|create?|salv[ae]|named?)[\s:]+[`"']?([\w][\w.\-/]*\.\w{1,5})[`"']?/i);
     let fileName;
-    if (fileNameMatch?.[1]) {
+    
+    const firstLineMatch = fileContent.trim().split('\n')[0].match(/^(?:\/\/|#|<!--|\/\*)\s*(?:file:\s*|arquivo:\s*|path:\s*|caminho:\s*)?([\w][\w.\-/]+\.\w{1,5})\s*(?:-->|\*\/)?\s*$/i);
+    
+    if (firstLineMatch?.[1]) {
+      fileName = firstLineMatch[1];
+    } else if (fileNameMatch?.[1]) {
       fileName = fileNameMatch[1];
     } else {
       if (ext === 'html') fileName = /login|signin/i.test(fileContent) ? 'login.html' : /register|cadastr/i.test(fileContent) ? 'register.html' : 'index.html';
@@ -915,7 +931,7 @@ function parseCodeBlocksFromResponse(content, workspacePath, socket, iteration =
 // ==========================================================================
 // Loop Agêntico Principal — Máxima Autonomia + Fila de Mensagens
 // ==========================================================================
-async function runAgentLoop(ollamaUrl, model, chatMessages, workspacePath, socket, getNextInterrupt = null) {
+async function runAgentLoop(ollamaUrl, model, chatMessages, workspacePath, socket, getNextInterrupt = null, numCtx = 4096, planningMode = false) {
   // Contexto automático do workspace
   let contextNote = '';
   try {
@@ -955,13 +971,21 @@ async function runAgentLoop(ollamaUrl, model, chatMessages, workspacePath, socke
     }
   } catch (e) {}
 
+  const planningPrompt = planningMode ? `\n\n## MODO DE PLANEJAMENTO ATIVADO
+O usuário solicitou que você crie um PLANO DE AÇÃO antes de escrever código.
+SUA TAREFA:
+1. Explore o workspace com list_files ou read_file se precisar entender o contexto.
+2. Crie um arquivo chamado "plano.md" usando a ferramenta create_file e escreva todo o seu plano detalhado nele (para que ele apareça no editor central da IDE).
+3. Após criar o arquivo, PARE e mande uma mensagem no chat perguntando se o usuário aprova o plano que está no arquivo plano.md.
+4. CRÍTICO: NÃO crie os arquivos do projeto nem use edit_file, delete_file ou run_command até que o usuário diga "aprovado" no chat.` : '';
+
   const messages = [
-    { role: 'system', content: AGENT_SYSTEM_PROMPT + contextNote },
+    { role: 'system', content: AGENT_SYSTEM_PROMPT + contextNote + planningPrompt },
     ...chatMessages
   ];
 
   let iterations = 0;
-  const isSmallModel = /^(.*:)?(0\.5b|1b|1\.5b|3b)$/i.test(model) || /1b-|3b-/i.test(model);
+  const isSmallModel = /^(.*:)?(0\.5b|1b|1\.5b)$/i.test(model) || /1b-/i.test(model);
 
   while (iterations < MAX_ITERATIONS) {
     iterations++;
@@ -988,12 +1012,13 @@ Responda ou execute o que foi pedido. Se era uma pergunta, responda brevemente. 
       const requestBody = {
         model,
         messages,
-        stream: false,
+        stream: true,
         options: {
-          temperature: 0.15,      // Mais determinístico
-          num_ctx: 4096,
-          repeat_penalty: 1.05,
-          top_p: 0.9
+          temperature: model.toLowerCase().includes('deepseek') ? 0.6 : 0.15,
+          num_ctx: numCtx,
+          repeat_penalty: model.toLowerCase().includes('deepseek') ? 1.15 : 1.05,
+          top_p: 0.9,
+          stop: ['<|im_end|>', '<|endoftext|>', '<|eot_id|>', 'User:', 'Assistant:', 'System:', '<｜end▁of▁sentence｜>']
         }
       };
 
@@ -1012,8 +1037,50 @@ Responda ou execute o que foi pedido. Se era uma pergunta, responda brevemente. 
         throw new Error(`Ollama API: ${response.status} — ${errText}`);
       }
 
-      const data = await response.json();
-      const assistantMessage = data.message;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let assistantMessage = { role: 'assistant', content: '', tool_calls: [] };
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          if (buffer.trim()) {
+            try {
+              const chunk = JSON.parse(buffer);
+              if (chunk.message?.content) {
+                assistantMessage.content += chunk.message.content;
+                socket.emit('agent-stream', { content: chunk.message.content, iteration: iterations });
+              }
+              if (chunk.message?.tool_calls) {
+                assistantMessage.tool_calls = chunk.message.tool_calls;
+              }
+            } catch(e) {}
+          }
+          break;
+        }
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // Guarda o pedaço incompleto para o próximo chunk
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const chunk = JSON.parse(line);
+            if (chunk.message?.content) {
+              assistantMessage.content += chunk.message.content;
+              socket.emit('agent-stream', { content: chunk.message.content, iteration: iterations });
+            }
+            if (chunk.message?.tool_calls) {
+              assistantMessage.tool_calls = chunk.message.tool_calls;
+            }
+          } catch (e) {
+            // ignora pedaços malformados
+          }
+        }
+      }
+
       messages.push(assistantMessage);
 
       // ── Tool calls (modelos 3B+) ──────────────────────────────────────────

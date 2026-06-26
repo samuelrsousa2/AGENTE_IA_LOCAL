@@ -11,6 +11,20 @@ var fileTreeData = [];
 var xterm = null;
 var fitAddon = null;
 
+window.currentProject = 'default';
+
+// Intercepta todos os fetches para a API para adicionar o projeto atual
+const originalFetch = window.fetch;
+window.fetch = async function() {
+  let [resource, config] = arguments;
+  if (typeof resource === 'string' && resource.startsWith('/api/')) {
+    config = config || {};
+    config.headers = config.headers || {};
+    config.headers['x-project-id'] = window.currentProject;
+  }
+  return originalFetch(resource, config);
+};
+
 // Socket compartilhado via window
 window.appSocket = null;
 
@@ -37,11 +51,21 @@ window.addEventListener('DOMContentLoaded', () => {
   initMobileBar();
   initExplorerButtons();
   initProjectRunner();
+  initProjectSelector();
+
+  // Load initial projects
+  loadProjects().then(() => {
+    loadFileTree();
+  });
 
   // File System Events are handled in the boot function above
 
   if (window.appSocket) {
-    window.appSocket.on('fs-change', () => loadFileTree());
+    window.appSocket.on('fs-change', (data) => {
+      // Ignora se não pertencer ao projeto atual
+      if (!data.path.startsWith(window.currentProject + '/')) return;
+      loadFileTree();
+    });
   }
 
   console.log('[IDE] Ready!');
@@ -118,8 +142,95 @@ function initMonaco() {
 }
 
 // ==========================================================================
-// File Explorer
+// Projects & File Explorer
 // ==========================================================================
+async function loadProjects() {
+  try {
+    const res = await fetch('/api/projects');
+    const projects = await res.json();
+    const select = document.getElementById('project-select');
+    if (!select) return;
+    
+    select.innerHTML = '';
+    for (const proj of projects) {
+      const opt = document.createElement('option');
+      opt.value = proj;
+      opt.textContent = proj;
+      select.appendChild(opt);
+    }
+    
+    if (projects.includes(window.currentProject)) {
+      select.value = window.currentProject;
+    } else if (projects.length > 0) {
+      window.currentProject = projects[0];
+      select.value = projects[0];
+    }
+  } catch (e) {
+    console.error('Error loading projects', e);
+  }
+}
+
+function initProjectSelector() {
+  const select = document.getElementById('project-select');
+  const btnNew = document.getElementById('btn-new-project');
+  
+  if (select) {
+    select.addEventListener('change', (e) => {
+      window.currentProject = e.target.value;
+      // Close all tabs and clear explorer
+      openTabs = [];
+      activeTab = null;
+      renderTabs();
+      if (monacoEditor) {
+        monacoEditor.setModel(null);
+        document.getElementById('editor-welcome').style.display = 'flex';
+      }
+      loadFileTree();
+      if (window.appSocket) {
+        // Reiniciar terminal para o projeto correto
+        window.appSocket.emit('terminal-start', { projectId: window.currentProject });
+      }
+    });
+  }
+  
+  if (btnNew) {
+    btnNew.addEventListener('click', async () => {
+      const name = prompt('Nome do novo projeto (sem espaços, minúsculo recomendado):');
+      if (!name) return;
+      
+      try {
+        const res = await fetch('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        const data = await res.json();
+        if (data.success) {
+          window.currentProject = data.project;
+          await loadProjects();
+          
+          openTabs = [];
+          activeTab = null;
+          renderTabs();
+          if (monacoEditor) {
+            monacoEditor.setModel(null);
+            document.getElementById('editor-welcome').style.display = 'flex';
+          }
+          loadFileTree();
+          
+          if (window.appSocket) {
+            window.appSocket.emit('terminal-start', { projectId: window.currentProject });
+          }
+        } else {
+          alert('Erro ao criar projeto: ' + data.error);
+        }
+      } catch (e) {
+        alert('Erro ao criar projeto');
+      }
+    });
+  }
+}
+
 async function loadFileTree() {
   try {
     const res = await fetch('/api/tree');
@@ -396,6 +507,7 @@ function showContextMenu(event, item) {
     actions.push({ label: '📄 Novo Arquivo', action: () => createFileInDir(item.path) });
     actions.push({ label: '📁 Nova Pasta', action: () => createFolderInDir(item.path) });
   }
+  actions.push({ label: '✏️ Renomear', action: () => renameItem(item.path) });
   actions.push({ label: '🗑️ Excluir', action: () => deleteItem(item.path), danger: true });
 
   for (const act of actions) {
@@ -443,6 +555,31 @@ async function deleteItem(itemPath) {
   if (!confirm(`Excluir "${itemPath}"?`)) return;
   await fetch(`/api/files/${itemPath}`, { method: 'DELETE' });
   if (openTabs.find(t => t.path === itemPath)) closeTab(itemPath);
+  loadFileTree();
+}
+
+async function renameItem(oldPath) {
+  const oldName = oldPath.split('/').pop();
+  const newName = prompt(`Novo nome para "${oldName}":`, oldName);
+  if (!newName || newName === oldName) return;
+  const dir = oldPath.substring(0, oldPath.lastIndexOf('/'));
+  const newPath = dir ? `${dir}/${newName}` : newName;
+
+  await fetch('/api/files/rename', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ oldPath, newPath })
+  });
+  
+  const existingTab = openTabs.find(t => t.path === oldPath);
+  if (existingTab) {
+    existingTab.path = newPath;
+    existingTab.name = newName;
+    monacoModels[newPath] = monacoModels[oldPath];
+    delete monacoModels[oldPath];
+    if (activeTab === oldPath) activeTab = newPath;
+    renderTabs();
+  }
   loadFileTree();
 }
 
@@ -632,7 +769,7 @@ function initResizeHandlers() {
 
   setupResize('resize-chat', (dx) => {
     const chat = document.getElementById('chat-panel');
-    const newW = Math.max(280, Math.min(600, chat.offsetWidth - dx));
+    const newW = Math.max(280, Math.min(800, chat.offsetWidth - dx));
     document.documentElement.style.setProperty('--chat-w', newW + 'px');
   }, 'horizontal');
 

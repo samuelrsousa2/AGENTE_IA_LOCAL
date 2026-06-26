@@ -34,7 +34,7 @@
   --info: #58a6ff;
 
   --sidebar-w: 250px;
-  --chat-w: 360px;
+  --chat-w: 450px;
   --header-h: 38px;
   --terminal-h: 220px;
   --tab-h: 38px;
@@ -105,8 +105,7 @@ button { font-family: inherit; }
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 12px;
-  height: var(--header-h);
+  padding: 12px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -555,7 +554,7 @@ kbd {
 /* Message Styles */
 .msg {
   padding: 12px 14px;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
   border-bottom: 1px solid var(--border);
   animation: fadeIn 0.2s ease;
@@ -704,10 +703,10 @@ kbd {
   outline: none;
   color: var(--text);
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 14px;
   padding: 6px 4px;
   resize: none;
-  max-height: 120px;
+  max-height: 200px;
   line-height: 1.5;
 }
 

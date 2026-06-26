@@ -28,18 +28,40 @@ const HISTORY_DIR = path.join(__dirname, 'data', 'chats');
   if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 });
 
-// Retorna workspace do usuário (cria se não existir)
-function getUserWorkspace(userId) {
-  const dir = path.join(WORKSPACES_DIR, userId);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+// Retorna workspace do usuário e projeto específico (cria se não existir)
+function getUserWorkspace(userId, projectId = 'default') {
+  projectId = projectId.replace(/[^a-zA-Z0-9_\-]/g, '');
+  if (!projectId) projectId = 'default';
+
+  const userDir = path.join(WORKSPACES_DIR, userId);
+  
+  // Migração: mover arquivos da raiz antiga para a pasta "default"
+  if (fs.existsSync(userDir)) {
+    const defaultDir = path.join(userDir, 'default');
+    if (!fs.existsSync(defaultDir)) {
+      fs.mkdirSync(defaultDir, { recursive: true });
+      const items = fs.readdirSync(userDir);
+      for (const item of items) {
+        if (item === 'default') continue;
+        const oldPath = path.join(userDir, item);
+        const newPath = path.join(defaultDir, item);
+        try { fs.renameSync(oldPath, newPath); } catch(e) {}
+      }
+    }
+  } else {
+    fs.mkdirSync(userDir, { recursive: true });
+  }
+
+  const projectDir = path.join(userDir, projectId);
+  if (!fs.existsSync(projectDir)) {
+    fs.mkdirSync(projectDir, { recursive: true });
     fs.writeFileSync(
-      path.join(dir, 'README.md'),
-      '# Meu Workspace\n\nBem-vindo! Use o agente IA para criar seus projetos aqui.\n',
+      path.join(projectDir, 'README.md'),
+      `# Projeto: ${projectId}\n\nBem-vindo! Use o agente IA para criar código aqui.\n`,
       'utf8'
     );
   }
-  return dir;
+  return projectDir;
 }
 
 // Retorna arquivo de histórico do usuário
@@ -313,7 +335,7 @@ app.post('/api/mcp/connect-all', requireAdmin, async (req, res) => {
 // Preview — serve arquivos do workspace do usuário
 // ==========================================================================
 app.use('/preview', requireAuth, (req, res, next) => {
-  const userWorkspace = getUserWorkspace(req.user.id);
+  const userWorkspace = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const filePath = path.resolve(userWorkspace, req.path.replace(/^\//, ''));
   if (!filePath.startsWith(userWorkspace)) return res.status(403).send('Forbidden');
   if (!fs.existsSync(filePath)) return res.status(404).send('Not found');
@@ -344,7 +366,7 @@ function buildZip(sourceDir, ignore = []) {
 }
 
 app.get('/api/download-zip', requireAuth, (req, res) => {
-  const userWorkspace = getUserWorkspace(req.user.id);
+  const userWorkspace = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const name = (req.query.name || 'projeto').replace(/[^a-zA-Z0-9_\-]/g, '_');
   try {
     const zip = buildZip(userWorkspace, ['node_modules', '.git', '__pycache__', '.env']);
@@ -384,6 +406,26 @@ function getFileTree(dirPath, relativeTo, depth = 0) {
   return entries;
 }
 
+app.get('/api/projects', requireAuth, (req, res) => {
+  const userDir = path.join(WORKSPACES_DIR, req.user.id);
+  if (!fs.existsSync(userDir)) return res.json(['default']);
+  const projects = fs.readdirSync(userDir, { withFileTypes: true })
+    .filter(dirent => dirent.isDirectory() && dirent.name !== '.git' && dirent.name !== 'node_modules')
+    .map(dirent => dirent.name);
+  if (projects.length === 0) projects.push('default');
+  res.json(projects);
+});
+
+app.post('/api/projects', requireAuth, (req, res) => {
+  const { name } = req.body;
+  if (!name) return res.status(400).json({ error: 'Project name is required' });
+  const sanitized = name.replace(/[^a-zA-Z0-9_\-]/g, '');
+  if (!sanitized) return res.status(400).json({ error: 'Invalid project name' });
+  
+  getUserWorkspace(req.user.id, sanitized);
+  res.json({ success: true, project: sanitized });
+});
+
 app.get('/api/models', async (req, res) => {
   try {
     const response = await fetch(`${OLLAMA_URL}/api/tags`);
@@ -396,12 +438,12 @@ app.get('/api/models', async (req, res) => {
 });
 
 app.get('/api/tree', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   res.json(getFileTree(ws, ws));
 });
 
 app.get('/api/files/*', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const fullPath = path.resolve(ws, req.params[0]);
   if (!fullPath.startsWith(ws)) return res.status(403).json({ error: 'Access denied' });
   if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'File not found' });
@@ -413,7 +455,7 @@ app.get('/api/files/*', requireAuth, (req, res) => {
 });
 
 app.post('/api/files/*', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const fullPath = path.resolve(ws, req.params[0]);
   if (!fullPath.startsWith(ws)) return res.status(403).json({ error: 'Access denied' });
   const dir = path.dirname(fullPath);
@@ -423,7 +465,7 @@ app.post('/api/files/*', requireAuth, (req, res) => {
 });
 
 app.delete('/api/files/*', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const fullPath = path.resolve(ws, req.params[0]);
   if (!fullPath.startsWith(ws)) return res.status(403).json({ error: 'Access denied' });
   if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Not found' });
@@ -434,7 +476,7 @@ app.delete('/api/files/*', requireAuth, (req, res) => {
 });
 
 app.put('/api/files/rename', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const { oldPath, newPath } = req.body;
   const fullOld = path.resolve(ws, oldPath);
   const fullNew = path.resolve(ws, newPath);
@@ -514,7 +556,7 @@ function execGit(args, cwd) {
 }
 
 app.get('/api/git/check', requireAuth, (req, res) => {
-  const result = execGit('--version', getUserWorkspace(req.user.id));
+  const result = execGit('--version', getUserWorkspace(req.user.id, req.headers['x-project-id']));
   res.json({ installed: result.success, version: result.output });
 });
 
@@ -578,7 +620,7 @@ app.post('/api/github/create-repo', requireAuth, async (req, res) => {
 });
 
 app.get('/api/git/status', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const status = execGit('status --porcelain', ws);
   const branch = execGit('branch --show-current', ws);
   const remote = execGit('remote -v', ws);
@@ -587,27 +629,27 @@ app.get('/api/git/status', requireAuth, (req, res) => {
 });
 
 app.post('/api/git/init', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const result = execGit('init', ws);
   if (result.success) execGit('branch -M main', ws);
   res.json(result);
 });
 
 app.post('/api/git/add', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const { files } = req.body;
   res.json(execGit(`add ${files || '.'}`, ws));
 });
 
 app.post('/api/git/commit', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const { message } = req.body;
   if (!message) return res.status(400).json({ error: 'Message required' });
   res.json(execGit(`commit -m "${message.replace(/"/g, '\\"')}"`, ws));
 });
 
 app.post('/api/git/push', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const config = readGitConfig(req.user.id);
   if (!config.token) return res.status(401).json({ error: 'Not connected to GitHub' });
   const remoteResult = execGit('remote get-url origin', ws);
@@ -622,7 +664,7 @@ app.post('/api/git/push', requireAuth, (req, res) => {
 });
 
 app.post('/api/git/pull', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const config = readGitConfig(req.user.id);
   const remoteResult = execGit('remote get-url origin', ws);
   if (!remoteResult.success) return res.status(400).json({ error: 'No remote configured.' });
@@ -636,14 +678,14 @@ app.post('/api/git/pull', requireAuth, (req, res) => {
 });
 
 app.post('/api/git/remote', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const { url } = req.body;
   execGit('remote remove origin', ws);
   res.json(execGit(`remote add origin ${url}`, ws));
 });
 
 app.post('/api/git/clone', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const config = readGitConfig(req.user.id);
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'URL required' });
@@ -703,14 +745,14 @@ function detectRunCommand(workspacePath) {
 
 function findFreeProjectPort(userId) {
   const usedPorts = new Set([...runningProjects.values()].map(p => p.port));
-  for (let port = 3001; port <= 3005; port++) {
+  for (let port = 3001; port <= 3010; port++) {
     if (!usedPorts.has(port)) return port;
   }
   return 3001; // fallback, kill current
 }
 
 app.post('/api/project/run', requireAuth, (req, res) => {
-  const ws = getUserWorkspace(req.user.id);
+  const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const { port: requestedPort } = req.body;
 
   // Matar processo anterior do mesmo usuário
@@ -784,7 +826,6 @@ io.use((socket, next) => {
   socket.user = user;
   next();
 });
-
 // Per-user file watchers
 const userWatchers = new Map();
 
@@ -793,21 +834,21 @@ const socketInterruptQueues = new Map(); // socketId → string[]
 
 io.on('connection', (socket) => {
   const user = socket.user;
-  const userWorkspace = getUserWorkspace(user.id);
+  const userRoot = path.join(WORKSPACES_DIR, user.id);
 
   console.log(`[WS] ${user.name} (${user.email}) conectado`);
 
-  // Setup file watcher for this user's workspace
+  // Setup file watcher for this user's entire root
   if (!userWatchers.has(user.id)) {
-    const watcher = chokidar.watch(userWorkspace, {
+    const watcher = chokidar.watch(userRoot, {
       ignored: /(^|[/\\])\.|node_modules/,
       persistent: true,
       ignoreInitial: true,
-      depth: 5
+      depth: 6
     });
     watcher.on('all', (event, filePath) => {
-      const relativePath = path.relative(userWorkspace, filePath).replace(/\\/g, '/');
-      // Only emit to sockets of this user
+      const relativePath = path.relative(userRoot, filePath).replace(/\\/g, '/');
+      // Emit 'fs-change' with project-prefixed path
       io.sockets.sockets.forEach(s => {
         if (s.user?.id === user.id) {
           s.emit('fs-change', { event, path: relativePath });
@@ -833,11 +874,12 @@ io.on('connection', (socket) => {
   });
 
   // Terminal
-  socket.on('terminal-start', () => {
+  socket.on('terminal-start', (data) => {
+    const ws = getUserWorkspace(user.id, data?.projectId);
     if (termProcess) { try { termProcess.kill(); } catch (e) {} }
     const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
     termProcess = spawn(shell, [], {
-      cwd: userWorkspace,
+      cwd: ws,
       env: { ...process.env, TERM: 'xterm-256color' },
       shell: false,
       stdio: ['pipe', 'pipe', 'pipe']
@@ -857,7 +899,8 @@ io.on('connection', (socket) => {
 
   // Agent — com fila de interrupção
   socket.on('agent-message', async (data) => {
-    const { model, messages, chatId } = data;
+    const { model, messages, chatId, num_ctx, planningMode, projectId } = data;
+    const ws = getUserWorkspace(user.id, projectId);
 
     // Limpa fila de interrupts ao iniciar nova conversa
     socketInterruptQueues.set(socket.id, []);
@@ -872,8 +915,10 @@ io.on('connection', (socket) => {
     };
 
     try {
-      const result = await runAgentLoop(OLLAMA_URL, model, messages, userWorkspace, socket, getNextInterrupt);
-      socket.emit('agent-complete', { chatId, content: result.content, iterations: result.iterations, error: result.error || false });
+      const result = await runAgentLoop(OLLAMA_URL, model, messages, ws, socket, getNextInterrupt, num_ctx, planningMode);
+      // Nota: agent.js já emitiu 'agent-done' com o conteúdo da resposta.
+      // Aqui emitimos apenas metadados de conclusão (sem content), para evitar mensagem duplicada no chat.
+      socket.emit('agent-complete', { chatId, iterations: result.iterations, error: result.error || false });
     } catch (error) {
       socket.emit('agent-error', { error: error.message });
     }

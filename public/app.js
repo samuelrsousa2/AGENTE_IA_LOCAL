@@ -27,7 +27,70 @@ if (typeof marked !== 'undefined') {
 }
 
 // ==========================================================================
-// Initialization
+// Model Settings Modal Logic
+// ==========================================================================
+const btnModelSettings = document.getElementById('btn-model-settings');
+const modelSettingsModal = document.getElementById('model-settings-modal');
+const btnCloseModelSettings = document.getElementById('btn-close-model-settings');
+const modelSettingsList = document.getElementById('model-settings-list');
+
+if (btnModelSettings) {
+  btnModelSettings.addEventListener('click', async () => {
+    // Show modal
+    modelSettingsModal.style.display = 'flex';
+    
+    // Load models
+    try {
+      modelSettingsList.innerHTML = '<p>Carregando...</p>';
+      const res = await fetch('/api/models');
+      const data = await res.json();
+      
+      const savedContexts = JSON.parse(localStorage.getItem('modelContexts') || '{}');
+      modelSettingsList.innerHTML = '';
+      
+      if (data.models && data.models.length > 0) {
+        data.models.forEach(m => {
+          const defaultCtx = savedContexts[m.name] || 4096;
+          const row = document.createElement('div');
+          row.className = 'setting-row';
+          row.innerHTML = `
+            <span style="font-size: 13px;">${m.name}</span>
+            <input type="number" min="1024" step="1024" value="${defaultCtx}" data-model="${m.name}" title="Context window (num_ctx)">
+          `;
+          modelSettingsList.appendChild(row);
+        });
+        
+        // Add save button
+        const saveBtn = document.createElement('button');
+        saveBtn.textContent = 'Salvar';
+        saveBtn.className = 'btn';
+        saveBtn.style.marginTop = '15px';
+        saveBtn.style.width = '100%';
+        saveBtn.onclick = () => {
+          const inputs = modelSettingsList.querySelectorAll('input[type="number"]');
+          const newContexts = {};
+          inputs.forEach(input => {
+            newContexts[input.dataset.model] = parseInt(input.value);
+          });
+          localStorage.setItem('modelContexts', JSON.stringify(newContexts));
+          modelSettingsModal.style.display = 'none';
+        };
+        modelSettingsList.appendChild(saveBtn);
+      } else {
+        modelSettingsList.innerHTML = '<p>Nenhum modelo encontrado.</p>';
+      }
+    } catch (e) {
+      modelSettingsList.innerHTML = '<p style="color:red">Erro ao carregar modelos.</p>';
+    }
+  });
+}
+
+if (btnCloseModelSettings) {
+  btnCloseModelSettings.addEventListener('click', () => {
+    modelSettingsModal.style.display = 'none';
+  });
+}
+
 // ==========================================================================
 window.addEventListener('DOMContentLoaded', async () => {
   console.log('[Chat] Initializing...');
@@ -71,9 +134,37 @@ function initSocketEvents() {
     updateLastActionResult(data);
   });
 
+  s.on('agent-stream', (data) => {
+    removeThinking();
+    if (!window.currentStreamingMsgEl || window.currentStreamingIteration !== data.iteration) {
+      const msgEl = document.createElement('div');
+      msgEl.className = 'msg bot streaming-msg';
+      msgEl.innerHTML = '<div class="msg-header"><span>🤖</span><span style="font-weight:600;">Agente IA</span></div><div class="msg-body"></div>';
+      chatMessages.appendChild(msgEl);
+      window.currentStreamingMsgEl = msgEl;
+      window.currentStreamingIteration = data.iteration;
+      window.currentStreamingContent = '';
+    }
+    
+    window.currentStreamingContent += data.content;
+    const bodyEl = window.currentStreamingMsgEl.querySelector('.msg-body');
+    if (typeof marked !== 'undefined') {
+      bodyEl.innerHTML = marked.parse(window.currentStreamingContent);
+    } else {
+      bodyEl.innerHTML = escapeHtml(window.currentStreamingContent).replace(/\n/g, '<br>');
+    }
+    scrollChatToBottom();
+  });
+
   s.on('agent-done', (data) => {
     removeThinking();
     const content = data.content || '';
+
+    if (window.currentStreamingMsgEl) {
+      window.currentStreamingMsgEl.remove();
+      window.currentStreamingMsgEl = null;
+      window.currentStreamingContent = '';
+    }
 
     // Detect ZIP download URL from agent tool result
     const zipMatch = content.match(/ZIP_DOWNLOAD_URL:([^\|]+)\|(.+)/);
@@ -102,6 +193,11 @@ function initSocketEvents() {
 
   s.on('agent-error', (data) => {
     removeThinking();
+    if (window.currentStreamingMsgEl) {
+      window.currentStreamingMsgEl.remove();
+      window.currentStreamingMsgEl = null;
+      window.currentStreamingContent = '';
+    }
     appendErrorMessage(data.error);
     chatState.isGenerating = false;
     btnSend.disabled = !chatInput.value.trim();
@@ -193,7 +289,12 @@ async function loadModels() {
         const opt = document.createElement('option');
         opt.value = model.name;
         const isReasoning = model.name.includes('deepseek-r1');
-        opt.textContent = `${model.name} ${isReasoning ? '(Raciocínio Longo ⏳)' : '(Direto ⚡)'}`;
+        let displayName = model.name;
+        if (model.name === 'minicpm-v:latest') displayName = 'minicpm-v:8b';
+        if (model.name === 'llama3.2-vision:latest') displayName = 'llama3.2-vision:11b';
+        if (model.name === 'qwen2-vl:latest') displayName = 'qwen2-vl:7b';
+        
+        opt.textContent = `${displayName} ${isReasoning ? '(Raciocínio Longo ⏳)' : '(Direto ⚡)'}`;
         modelSelect.appendChild(opt);
       }
 
@@ -526,10 +627,18 @@ async function sendMessage() {
   appendMessage('user', content);
 
   // Send to agent
+  const modelContexts = JSON.parse(localStorage.getItem('modelContexts') || '{}');
+  const customNumCtx = modelContexts[chatState.selectedModel] ? parseInt(modelContexts[chatState.selectedModel]) : 4096;
+
+  const isPlanningMode = document.getElementById('planning-mode-checkbox')?.checked || false;
+
   s.emit('agent-message', {
     model: chatState.selectedModel,
     messages: chat.messages,
-    chatId: chat.id
+    chatId: chat.id,
+    num_ctx: customNumCtx,
+    planningMode: isPlanningMode,
+    projectId: window.currentProject
   });
 
   await saveChatToServer(chat);

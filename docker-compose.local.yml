@@ -12,6 +12,10 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+      - "3001-3010:3001-3010"
+      - "4000-4010:4000-4010"
+      - "5000-5010:5000-5010"
+      - "8000-8010:8000-8010"
     volumes:
       # Dados persistentes fora do container
       - ./workspaces:/workspaces

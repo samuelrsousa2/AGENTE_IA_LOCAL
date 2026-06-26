@@ -3,7 +3,7 @@
 # ==========================================================================
 FROM node:20-alpine
 
-# Build tools necessários para pacotes nativos (better-sqlite3, bcryptjs)
+# Build tools e dependências do Puppeteer (Chromium) para o Alpine
 RUN apk add --no-cache \
     git \
     python3 \
@@ -11,7 +11,17 @@ RUN apk add --no-cache \
     make \
     g++ \
     curl \
-    bash
+    bash \
+    chromium \
+    nss \
+    freetype \
+    harfbuzz \
+    ca-certificates \
+    ttf-freefont
+
+# Configura o Puppeteer para usar o Chromium do Alpine
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 WORKDIR /app
 

@@ -14,8 +14,11 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
-      # Portas para projetos criados pelo agente (3001-3020)
+      # Portas para projetos criados pelo agente
       - "3001-3020:3001-3020"
+      - "4000-4010:4000-4010"
+      - "5000-5010:5000-5010"
+      - "8000-8010:8000-8010"
     volumes:
       - ./workspace:/workspace
       - /var/run/docker.sock:/var/run/docker.sock  # Docker-in-Docker

@@ -1,0 +1,10 @@
+{
+  "name": "phaser-game",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "phaser": "^3.55.2"
+  }
+}

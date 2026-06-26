@@ -29,7 +29,7 @@ class MCPServerConnection {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error(`Timeout connecting to MCP server "${this.name}"`));
-      }, 15000);
+      }, 60000);
 
       try {
         const env = { ...process.env, ...(this.config.env || {}) };
