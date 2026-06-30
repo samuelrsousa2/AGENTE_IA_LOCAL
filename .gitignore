@@ -8,3 +8,6 @@ build-sqlite.bat
 data/*.db-shm
 data/*.db-wal
 data/github-*.json
+_boot.log
+_o.log
+_e.log
