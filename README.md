@@ -10,22 +10,57 @@ Este projeto é uma plataforma local completa de desenvolvimento (IDE) embutida 
 - **Projetos via Docker:** Permite isolar os ambientes de desenvolvimento.
 - **Autenticação:** Sistema próprio usando JWT e SQLite embutido (ou opcionalmente Google OAuth).
 
+## 🔄 Fluxo do Super-Agente (Pipeline)
+
+O agente executa um pipeline de engenharia completo e estruturado:
+
+```
+Usuário → 📋 Prompt/Planejamento → ✋ Aprovação → ⚙️ Execução →
+🔨 Build → (corrigir → Build) → 🧪 Testes → (corrigir → Testes) →
+▶️ Executar → ✅ Validar → 🔍 Autoavaliação → 🎁 Entregar
+```
+
+- **Planejamento**: o agente escreve um `plano.md` detalhado.
+- **Aprovação**: com o "Modo Planejamento" ligado, o agente PARA e espera você responder `aprovado` no chat antes de executar.
+- **Build/Testes em loop**: se o build ou os testes falham, o agente lê o erro, corrige e tenta de novo até passar.
+- **Validar**: confirma que o app realmente sobe e responde.
+- **Autoavaliação**: o agente revisa o próprio trabalho antes de entregar.
+
+A IDE mostra um **tracker visual** das fases em tempo real durante a execução.
+
 ## Como Rodar o Projeto
 
-1. Certifique-se de ter o **Node.js** e o **Docker** instalados.
-2. Clone o repositório ou faça o download da pasta.
-3. Abra o terminal na raiz do projeto e instale as dependências:
+> **Importante (Windows):** este projeto usa `better-sqlite3`, um módulo nativo que precisa
+> compilar contra uma versão **estável (LTS)** do Node. Versões muito novas do Node (ex: v25)
+> não têm binário pré-compilado. Por isso o projeto traz um **Node 22 LTS portátil** em `.node-lts/`
+> e um `start.bat` que o utiliza automaticamente.
+
+### Opção A — Recomendada (usa o Node LTS local)
+```bat
+start.bat
+```
+
+### Opção B — Manual
+1. Tenha o **Node.js** instalado (de preferência LTS v20/v22).
+2. Instale as dependências:
    ```bash
    npm install
    ```
-4. Inicie o servidor:
+   Se `better-sqlite3` falhar ao compilar, garanta que você tem o **Visual Studio Build Tools
+   (workload "Desktop development with C++")** e o **Python 3.x**, depois rode:
    ```bash
-   npm run dev
-   # ou
+   npm rebuild better-sqlite3
+   ```
+3. Inicie o servidor:
+   ```bash
    node server.js
    ```
 
-O painel e a IDE estarão disponíveis no navegador, tipicamente em `http://localhost:3000`.
+O painel e a IDE estarão disponíveis em `http://localhost:3000`.
+
+### Pré-requisito: Ollama
+O agente usa o **Ollama** como backend de IA. Instale (https://ollama.com), rode um modelo
+(ex: `ollama run qwen2.5:7b`) e ajuste `OLLAMA_URL` no `.env` se o Ollama estiver em outra máquina.
 
 ## Usuários de Teste Padrão
 

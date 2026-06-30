@@ -215,6 +215,11 @@ function initSocketEvents() {
     updateInputPlaceholder();
   });
 
+  // ─── Pipeline do Super-Agente (fases) ───────────────────────────────────
+  s.on('agent-phase', (data) => {
+    updatePipeline(data.phase, data.label, data.emoji);
+  });
+
   // ─── Fila de mensagens durante execução ─────────────────────────────────
   s.on('interrupt-queued', (data) => {
     showInterruptBadge(data.position, data.content);
@@ -625,6 +630,7 @@ async function sendMessage() {
   // Render
   chatWelcome.style.display = 'none';
   appendMessage('user', content);
+  resetPipeline();
 
   // Send to agent
   const modelContexts = JSON.parse(localStorage.getItem('modelContexts') || '{}');
@@ -642,6 +648,65 @@ async function sendMessage() {
   });
 
   await saveChatToServer(chat);
+}
+
+// ==========================================================================
+// Pipeline do Super-Agente — tracker visual das fases
+// ==========================================================================
+const PIPELINE_STEPS = [
+  { id: 'planning',   emoji: '📋', label: 'Planejar' },
+  { id: 'approval',   emoji: '✋', label: 'Aprovar' },
+  { id: 'execution',  emoji: '⚙️', label: 'Executar' },
+  { id: 'build',      emoji: '🔨', label: 'Build' },
+  { id: 'test',       emoji: '🧪', label: 'Testes' },
+  { id: 'run',        emoji: '▶️', label: 'Rodar' },
+  { id: 'validate',   emoji: '✅', label: 'Validar' },
+  { id: 'selfreview', emoji: '🔍', label: 'Avaliar' },
+  { id: 'deliver',    emoji: '🎁', label: 'Entregar' }
+];
+
+function ensurePipelineEl() {
+  let el = document.getElementById('agent-pipeline');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'agent-pipeline';
+    el.className = 'agent-pipeline';
+    el.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding:10px 12px;margin:8px 0;background:rgba(124,58,237,0.06);border:1px solid rgba(124,58,237,0.18);border-radius:10px;font-size:12px;';
+    el.innerHTML = PIPELINE_STEPS.map(s =>
+      `<span class="pl-step" data-step="${s.id}" style="opacity:.4;display:inline-flex;align-items:center;gap:3px;padding:3px 8px;border-radius:6px;transition:all .2s;">${s.emoji} ${s.label}</span>`
+    ).join('<span style="opacity:.3;align-self:center;">›</span>');
+    if (chatMessages) chatMessages.appendChild(el);
+  }
+  return el;
+}
+
+function resetPipeline() {
+  const el = document.getElementById('agent-pipeline');
+  if (el) el.remove();
+}
+
+function updatePipeline(phaseId, label, emoji) {
+  const el = ensurePipelineEl();
+  const idx = PIPELINE_STEPS.findIndex(s => s.id === phaseId);
+  if (idx === -1) return;
+  el.querySelectorAll('.pl-step').forEach((stepEl, i) => {
+    if (i < idx) {
+      stepEl.style.opacity = '1';
+      stepEl.style.color = '#22c55e';
+      stepEl.style.background = 'transparent';
+    } else if (i === idx) {
+      stepEl.style.opacity = '1';
+      stepEl.style.color = '#fff';
+      stepEl.style.background = 'rgba(124,58,237,0.45)';
+      stepEl.style.fontWeight = '600';
+    } else {
+      stepEl.style.opacity = '.4';
+      stepEl.style.color = '';
+      stepEl.style.background = 'transparent';
+      stepEl.style.fontWeight = '';
+    }
+  });
+  if (typeof scrollChatToBottom === 'function') scrollChatToBottom();
 }
 
 // ==========================================================================

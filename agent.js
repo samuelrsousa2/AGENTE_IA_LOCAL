@@ -207,9 +207,48 @@ const TOOLS_DEFINITION = [
 ];
 
 // ==========================================================================
-// System Prompt — Máxima Autonomia
+// SUPER-AGENT PIPELINE — Fases do fluxo de trabalho
 // ==========================================================================
-const AGENT_SYSTEM_PROMPT = `You are an elite autonomous software engineer AI. You work COMPLETELY INDEPENDENTLY — you plan, implement, run, test, and fix code WITHOUT asking the user for permission or confirmation.
+// Fluxo: Prompt → Planejamento → Aprovação do usuário → Execução →
+//        Build → Corrigir → Build → Testes → Corrigir → Testes →
+//        Executar → Validar → Autoavaliação → Entregar
+const PIPELINE_PHASES = [
+  { id: 'planning',   label: '📋 Planejamento',   emoji: '📋' },
+  { id: 'approval',   label: '✋ Aguardando aprovação', emoji: '✋' },
+  { id: 'execution',  label: '⚙️ Execução',        emoji: '⚙️' },
+  { id: 'build',      label: '🔨 Build',           emoji: '🔨' },
+  { id: 'test',       label: '🧪 Testes',          emoji: '🧪' },
+  { id: 'run',        label: '▶️ Executar',         emoji: '▶️' },
+  { id: 'validate',   label: '✅ Validar',          emoji: '✅' },
+  { id: 'selfreview', label: '🔍 Autoavaliação',   emoji: '🔍' },
+  { id: 'deliver',    label: '🎁 Entregar',         emoji: '🎁' }
+];
+
+function emitPhase(socket, phaseId, detail = '') {
+  const phase = PIPELINE_PHASES.find(p => p.id === phaseId);
+  if (!phase) return;
+  socket.emit('agent-phase', { phase: phaseId, label: phase.label, emoji: phase.emoji, detail });
+}
+
+// ==========================================================================
+// System Prompt — Máxima Autonomia + Pipeline de Super-Agente
+// ==========================================================================
+const AGENT_SYSTEM_PROMPT = `You are an elite autonomous software engineer AI ("Super Agente"). You work COMPLETELY INDEPENDENTLY — you plan, implement, build, test, and fix code following a STRICT engineering pipeline.
+
+## 🔄 SUPER-AGENT PIPELINE — FOLLOW THIS EXACT ORDER EVERY TIME
+You operate as a structured pipeline. Announce each phase before doing it, prefixed with its emoji:
+
+1. 📋 PLANEJAMENTO — Analyze the request, survey the workspace (list_files), and write a clear plan into "plano.md" using create_file.
+2. ✋ APROVAÇÃO — Stop and ask the user to approve the plan (ONLY when planning mode is on). If planning mode is off, proceed automatically.
+3. ⚙️ EXECUÇÃO — Create ALL source files, configs, and a test file. Install dependencies.
+4. 🔨 BUILD — Compile/build the project (npm install, npx tsc, etc.). If it FAILS → fix the error → BUILD AGAIN. Repeat until the build is clean (max 3 attempts per error).
+5. 🧪 TESTES — Run your automated test file. If tests FAIL → read the error → fix the code → run TESTES AGAIN. Repeat until all tests pass (exit code 0).
+6. ▶️ EXECUTAR — Start the app/server with run_background and capture the URL.
+7. ✅ VALIDAR — Verify the running app actually responds (e.g. fetch the health endpoint / hit the API). Confirm there are no runtime errors.
+8. 🔍 AUTOAVALIAÇÃO — Critically review your own work: did you meet every requirement? List what works and any limitations. If you find a gap, go back and fix it.
+9. 🎁 ENTREGAR — Give the final summary: what was built, how to run it, the URL, and the test results.
+
+CRITICAL: Never skip BUILD or TESTES. Never claim "done" until the app builds, all tests pass, AND it runs and responds. The loop "Build → Corrigir → Build" and "Testes → Corrigir → Testes" is MANDATORY — keep iterating until green.
 
 ## CORE PRINCIPLES — NEVER BREAK THESE
 
@@ -227,13 +266,16 @@ const AGENT_SYSTEM_PROMPT = `You are an elite autonomous software engineer AI. Y
 - ALWAYS use the \`list_files\` tool to explore the directory structure.
 - CRITICAL: If you output code in markdown blocks instead of using tools, you MUST put the exact file path as a comment on the VERY FIRST LINE of the code block. (e.g. \`// src/server.js\` or \`<!-- public/login.html -->\` or \`# setup.sh\`).
 
-### 2. AUTONOMOUS WORKFLOW — FOLLOW THIS EVERY TIME
-1. list_files(".") — survey the workspace
-2. Plan the full solution mentally
-3. Execute: create ALL files (including source files and a test script), install ALL dependencies, run ALL commands
-4. Test & Verify: run the server in the background, run your automated test script (e.g. test.js / test.ts), and verify it passes with exit code 0
-5. Fix: if tests or commands fail, read the error output, fix the code, and run tests again
-6. Confirm: only message the user when everything is working AND all automated tests have successfully passed
+### 2. AUTONOMOUS WORKFLOW — FOLLOW THE PIPELINE EVERY TIME
+1. 📋 list_files(".") — survey the workspace, then write the plan to plano.md
+2. ✋ If planning mode is ON: stop and wait for the user to approve. If OFF: continue.
+3. ⚙️ Execute: create ALL files (including source files and a test script), install ALL dependencies
+4. 🔨 Build: compile/build. On failure → fix → build again (loop until clean)
+5. 🧪 Test: run your automated test script (test.js / test.ts) and verify exit code 0. On failure → fix → test again (loop until green)
+6. ▶️ Run: start the server/app in the background with run_background
+7. ✅ Validate: confirm the running app responds (fetch endpoint / call API), no runtime errors
+8. 🔍 Self-review: confirm every requirement is met; fix any gap you find
+9. 🎁 Deliver: only message "done" when build is clean, ALL tests pass, AND the app runs and responds
 
 ### 3. COMPLETE PROJECTS — NO HALF-MEASURES
 - Every project needs: package.json → npm install → all source files → tested and running
@@ -971,13 +1013,13 @@ async function runAgentLoop(ollamaUrl, model, chatMessages, workspacePath, socke
     }
   } catch (e) {}
 
-  const planningPrompt = planningMode ? `\n\n## MODO DE PLANEJAMENTO ATIVADO
-O usuário solicitou que você crie um PLANO DE AÇÃO antes de escrever código.
-SUA TAREFA:
-1. Explore o workspace com list_files ou read_file se precisar entender o contexto.
-2. Crie um arquivo chamado "plano.md" usando a ferramenta create_file e escreva todo o seu plano detalhado nele (para que ele apareça no editor central da IDE).
-3. Após criar o arquivo, PARE e mande uma mensagem no chat perguntando se o usuário aprova o plano que está no arquivo plano.md.
-4. CRÍTICO: NÃO crie os arquivos do projeto nem use edit_file, delete_file ou run_command até que o usuário diga "aprovado" no chat.` : '';
+  const planningPrompt = planningMode ? `\n\n## ✋ MODO DE PLANEJAMENTO/APROVAÇÃO ATIVADO
+O usuário quer aprovar o plano ANTES da execução. Siga o início do pipeline:
+1. 📋 PLANEJAMENTO: Explore o workspace com list_files/read_file para entender o contexto.
+2. Crie um arquivo "plano.md" com create_file contendo o plano DETALHADO: objetivo, arquivos a criar, dependências, como será o build, quais testes serão escritos, e como o app será executado/validado.
+3. ✋ APROVAÇÃO: Após criar o plano.md, PARE e mande UMA mensagem curta no chat pedindo aprovação ("Revise o plano.md. Posso prosseguir? Responda 'aprovado' para eu executar todo o pipeline: Build → Testes → Executar → Validar → Entregar.").
+4. CRÍTICO: NÃO crie arquivos do projeto, nem use edit_file/delete_file/run_command/run_background até o usuário responder "aprovado" (ou equivalente).
+5. Assim que aprovado, execute o RESTANTE DO PIPELINE inteiro automaticamente, sem parar de novo: ⚙️ Execução → 🔨 Build (corrigir e rebuildar até passar) → 🧪 Testes (corrigir e re-testar até passar) → ▶️ Executar → ✅ Validar → 🔍 Autoavaliação → 🎁 Entregar.` : '';
 
   const messages = [
     { role: 'system', content: AGENT_SYSTEM_PROMPT + contextNote + planningPrompt },
@@ -987,6 +1029,45 @@ SUA TAREFA:
   let iterations = 0;
   const isSmallModel = /^(.*:)?(0\.5b|1b|1\.5b)$/i.test(model) || /1b-/i.test(model);
 
+  // ── Detector de fase do pipeline (a partir do texto/emoji do agente) ──
+  let lastPhase = null;
+  let awaitingApproval = false;
+  // Approval tem prioridade: se o agente pede aprovação, trava nessa fase.
+  const approvalRe = /✋|aprova(r|ção|do)|aguardando aprova|posso prosseguir|responda ['"]?aprovado/i;
+  const phaseMatchers = [
+    { id: 'planning',   re: /📋|planejamento/i },
+    { id: 'execution',  re: /⚙️|execução|criando (os )?arquivos/i },
+    { id: 'build',      re: /🔨|\bbuild\b|compilando|compilação/i },
+    { id: 'test',       re: /🧪|\btestes?\b|rodando teste/i },
+    { id: 'run',        re: /▶️|iniciando (o )?servidor|servidor (started|iniciad)/i },
+    { id: 'validate',   re: /✅|validar|validação|verificando.*(endpoint|health)/i },
+    { id: 'selfreview', re: /🔍|autoavalia|auto-avalia/i },
+    { id: 'deliver',    re: /🎁|entregue|concluíd[oa]/i }
+  ];
+  function detectAndEmitPhase(text) {
+    if (!text) return;
+    // Approval vence tudo enquanto a frase de aprovação estiver presente
+    if (approvalRe.test(text)) {
+      awaitingApproval = true;
+      if (lastPhase !== 'approval') { lastPhase = 'approval'; emitPhase(socket, 'approval', ''); }
+      return;
+    }
+    for (let i = phaseMatchers.length - 1; i >= 0; i--) {
+      if (phaseMatchers[i].re.test(text)) {
+        if (lastPhase !== phaseMatchers[i].id) {
+          lastPhase = phaseMatchers[i].id;
+          emitPhase(socket, phaseMatchers[i].id, '');
+        }
+        return;
+      }
+    }
+  }
+  function emitPhaseOnce(phaseId) {
+    if (lastPhase === phaseId) return;
+    lastPhase = phaseId;
+    emitPhase(socket, phaseId, '');
+  }
+
   while (iterations < MAX_ITERATIONS) {
     iterations++;
 
@@ -994,6 +1075,11 @@ SUA TAREFA:
     if (getNextInterrupt) {
       const interruptMsg = getNextInterrupt();
       if (interruptMsg) {
+        // Se o usuário aprovou, libera o pipeline para continuar
+        if (/aprovad|aprovo|pode (prosseguir|continuar|seguir)|sim,? pode|✅/i.test(interruptMsg)) {
+          awaitingApproval = false;
+          emitPhaseOnce('execution');
+        }
         // Notifica o frontend que o agente leu a mensagem
         socket.emit('interrupt-received', { content: interruptMsg });
         // Injeta como mensagem do usuário com contexto especial
@@ -1071,6 +1157,7 @@ Responda ou execute o que foi pedido. Se era uma pergunta, responda brevemente. 
             if (chunk.message?.content) {
               assistantMessage.content += chunk.message.content;
               socket.emit('agent-stream', { content: chunk.message.content, iteration: iterations });
+              detectAndEmitPhase(assistantMessage.content);
             }
             if (chunk.message?.tool_calls) {
               assistantMessage.tool_calls = chunk.message.tool_calls;
@@ -1098,6 +1185,20 @@ Responda ou execute o que foi pedido. Se era uma pergunta, responda brevemente. 
 
           // Emit action to frontend
           socket.emit('agent-action', { tool: toolName, args: toolArgs, iteration: iterations });
+
+          // Mapeia ferramenta → fase do pipeline
+          if (toolName === 'create_file' || toolName === 'edit_file' || toolName === 'delete_file') {
+            const p = (toolArgs.path || '').toLowerCase();
+            if (p === 'plano.md') emitPhaseOnce('planning');
+            else if (/test/.test(p)) emitPhaseOnce('test');
+            else emitPhaseOnce('execution');
+          } else if (toolName === 'run_command') {
+            const cmd = (toolArgs.command || '').toLowerCase();
+            if (/test/.test(cmd)) emitPhaseOnce('test');
+            else if (/install|tsc|build|compile/.test(cmd)) emitPhaseOnce('build');
+          } else if (toolName === 'run_background') {
+            emitPhaseOnce('run');
+          }
 
           const toolResult = await executeTool(toolName, toolArgs, workspacePath);
 
@@ -1162,12 +1263,14 @@ Responda ou execute o que foi pedido. Se era uma pergunta, responda brevemente. 
             .replace(/\n{3,}/g, '\n\n')
             .trim();
           if (!cleanContent) cleanContent = `✅ ${filesCreated} arquivo(s) criado(s) com sucesso!`;
+          if (!awaitingApproval) emitPhaseOnce('deliver');
           socket.emit('agent-done', { content: cleanContent, iterations });
           return { content: cleanContent, messages: messages.slice(1), iterations };
         }
       }
 
-
+      // Se não está aguardando aprovação, a resposta final é a entrega
+      if (!awaitingApproval && !approvalRe.test(finalContent)) emitPhaseOnce('deliver');
       socket.emit('agent-done', { content: finalContent, iterations });
       return { content: finalContent, messages: messages.slice(1), iterations };
 

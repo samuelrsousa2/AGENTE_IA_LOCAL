@@ -1,1 +1,10 @@
 node_modules
+.node-lts
+_srv_out.log
+_srv_err.log
+build-sqlite.bat
+.test-ws
+.env
+data/*.db-shm
+data/*.db-wal
+data/github-*.json

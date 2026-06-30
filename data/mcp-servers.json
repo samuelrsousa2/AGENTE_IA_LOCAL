@@ -1,19 +1,19 @@
 {
   "servers": {
     "filesystem": {
-      "enabled": true,
+      "enabled": false,
       "transport": "stdio",
       "command": "npx",
       "args": [
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "/workspaces"
+        "./workspaces"
       ],
       "env": {},
-      "description": "Acesso ao sistema de arquivos externo (fora do workspace)"
+      "description": "Acesso ao sistema de arquivos externo (fora do workspace). Desabilitado por padrão — habilite no Admin se precisar."
     },
     "postgres": {
-      "enabled": true,
+      "enabled": false,
       "transport": "stdio",
       "command": "npx",
       "args": [
@@ -22,10 +22,10 @@
         "postgres://user:password@localhost:5432/mydb"
       ],
       "env": {},
-      "description": "Banco de dados PostgreSQL — consultas e modificações"
+      "description": "Banco de dados PostgreSQL. Desabilitado — configure a connection string e habilite no Admin."
     },
     "browser": {
-      "enabled": true,
+      "enabled": false,
       "transport": "stdio",
       "command": "npx",
       "args": [
@@ -33,10 +33,10 @@
         "@modelcontextprotocol/server-puppeteer"
       ],
       "env": {},
-      "description": "Navegador web (Puppeteer) para pesquisas e testes de UI"
+      "description": "Navegador web (Puppeteer). Desabilitado por padrão — habilite no Admin se precisar."
     },
     "github": {
-      "enabled": true,
+      "enabled": false,
       "transport": "stdio",
       "command": "npx",
       "args": [
@@ -46,7 +46,7 @@
       "env": {
         "GITHUB_TOKEN": ""
       },
-      "description": "GitHub API — repos, issues, pull requests"
+      "description": "GitHub API. Desabilitado — adicione um GITHUB_TOKEN e habilite no Admin."
     }
   }
 }
