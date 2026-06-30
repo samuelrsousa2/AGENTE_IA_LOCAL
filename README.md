@@ -72,6 +72,19 @@ Para não esquecer, a plataforma gera automaticamente um usuário administrador 
 
 > **Nota:** Com esse usuário você pode acessar o Painel Admin da plataforma, criar novos usuários, mudar assinaturas e ver as estatísticas.
 
+## 🔒 Segurança
+
+- **Isolamento de workspace**: cada usuário só acessa sua própria pasta. Tentativas de
+  "escapar" (`../`, paths absolutos, diretórios irmãos) são bloqueadas no servidor e no agente.
+- **Comandos destrutivos bloqueados**: `rm -rf /`, `shutdown`, `format`, `curl | bash`, etc.
+  são recusados mesmo após a aprovação do plano.
+- **Gate de aprovação real**: em modo planejamento, o agente fica **impedido pelo servidor**
+  de criar arquivos/rodar comandos até o usuário responder "aprovado" — não depende do modelo.
+- **JWT secret automático**: se não houver `JWT_SECRET` no `.env`, um segredo aleatório forte
+  é gerado e salvo em `data/.jwt-secret`.
+- **Bind local por padrão**: o servidor escuta em `127.0.0.1`. Para expor na rede, defina
+  `BIND_HOST=0.0.0.0` no `.env` — ciente de que `run_command` executa no host.
+
 ## Notas Adicionais
 - As pastas `workspace/` e `workspaces/` armazenam o código gerado em tempo de execução. Elas são ignoradas no Git (ou pelo menos seus metadados `.git` foram removidos para evitar erros de submódulo).
 - O banco de dados local fica salvo em `data/ide.db` (SQLite).

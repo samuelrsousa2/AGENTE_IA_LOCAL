@@ -2,8 +2,39 @@
 // auth/middleware.js — JWT middleware simples (sem Google, sem Stripe)
 // ==========================================================================
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'ide-secret-local-dev-change-in-prod';
+// JWT secret: usa o do .env; se não houver (ou for o placeholder fraco),
+// gera um segredo aleatório forte e o persiste em data/.jwt-secret.
+function resolveJwtSecret() {
+  const fromEnv = process.env.JWT_SECRET;
+  const weakDefaults = [
+    'ide-secret-local-dev-change-in-prod',
+    'ide-secret-mude-isso-em-producao-use-string-longa-e-aleatoria'
+  ];
+  if (fromEnv && !weakDefaults.includes(fromEnv)) return fromEnv;
+
+  const secretFile = path.join(__dirname, '..', 'data', '.jwt-secret');
+  try {
+    if (fs.existsSync(secretFile)) {
+      const saved = fs.readFileSync(secretFile, 'utf8').trim();
+      if (saved.length >= 32) return saved;
+    }
+    const generated = crypto.randomBytes(48).toString('hex');
+    fs.mkdirSync(path.dirname(secretFile), { recursive: true });
+    fs.writeFileSync(secretFile, generated, 'utf8');
+    console.warn('⚠️  JWT_SECRET não definido no .env — gerado um segredo aleatório em data/.jwt-secret');
+    return generated;
+  } catch (e) {
+    // Último recurso: segredo aleatório em memória (invalida tokens a cada restart)
+    console.warn('⚠️  Não foi possível persistir o JWT secret — usando segredo efêmero:', e.message);
+    return crypto.randomBytes(48).toString('hex');
+  }
+}
+
+const JWT_SECRET = resolveJwtSecret();
 
 function generateToken(user) {
   return jwt.sign(

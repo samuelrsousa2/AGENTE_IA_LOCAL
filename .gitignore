@@ -11,3 +11,4 @@ data/github-*.json
 _boot.log
 _o.log
 _e.log
+data/.jwt-secret

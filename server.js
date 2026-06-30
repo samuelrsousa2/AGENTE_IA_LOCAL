@@ -28,6 +28,16 @@ const HISTORY_DIR = path.join(__dirname, 'data', 'chats');
   if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 });
 
+// Segurança: resolve um caminho garantindo que fica DENTRO de baseDir.
+// Usa path.relative para evitar o bug do startsWith (ex: /u1 vs /u1-x).
+function safeResolve(baseDir, target) {
+  const base = path.resolve(baseDir);
+  const resolved = path.resolve(base, target || '.');
+  const rel = path.relative(base, resolved);
+  const inside = resolved === base || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  return { resolved, inside };
+}
+
 // Retorna workspace do usuário e projeto específico (cria se não existir)
 function getUserWorkspace(userId, projectId = 'default') {
   projectId = projectId.replace(/[^a-zA-Z0-9_\-]/g, '');
@@ -336,8 +346,8 @@ app.post('/api/mcp/connect-all', requireAdmin, async (req, res) => {
 // ==========================================================================
 app.use('/preview', requireAuth, (req, res, next) => {
   const userWorkspace = getUserWorkspace(req.user.id, req.headers['x-project-id']);
-  const filePath = path.resolve(userWorkspace, req.path.replace(/^\//, ''));
-  if (!filePath.startsWith(userWorkspace)) return res.status(403).send('Forbidden');
+  const { resolved: filePath, inside } = safeResolve(userWorkspace, req.path.replace(/^\//, ''));
+  if (!inside) return res.status(403).send('Forbidden');
   if (!fs.existsSync(filePath)) return res.status(404).send('Not found');
   res.sendFile(filePath);
 });
@@ -444,8 +454,8 @@ app.get('/api/tree', requireAuth, (req, res) => {
 
 app.get('/api/files/*', requireAuth, (req, res) => {
   const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
-  const fullPath = path.resolve(ws, req.params[0]);
-  if (!fullPath.startsWith(ws)) return res.status(403).json({ error: 'Access denied' });
+  const { resolved: fullPath, inside } = safeResolve(ws, req.params[0]);
+  if (!inside) return res.status(403).json({ error: 'Access denied' });
   if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'File not found' });
   try {
     res.json({ path: req.params[0], content: fs.readFileSync(fullPath, 'utf8') });
@@ -456,8 +466,8 @@ app.get('/api/files/*', requireAuth, (req, res) => {
 
 app.post('/api/files/*', requireAuth, (req, res) => {
   const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
-  const fullPath = path.resolve(ws, req.params[0]);
-  if (!fullPath.startsWith(ws)) return res.status(403).json({ error: 'Access denied' });
+  const { resolved: fullPath, inside } = safeResolve(ws, req.params[0]);
+  if (!inside) return res.status(403).json({ error: 'Access denied' });
   const dir = path.dirname(fullPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(fullPath, req.body.content || '', 'utf8');
@@ -466,8 +476,9 @@ app.post('/api/files/*', requireAuth, (req, res) => {
 
 app.delete('/api/files/*', requireAuth, (req, res) => {
   const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
-  const fullPath = path.resolve(ws, req.params[0]);
-  if (!fullPath.startsWith(ws)) return res.status(403).json({ error: 'Access denied' });
+  const { resolved: fullPath, inside } = safeResolve(ws, req.params[0]);
+  if (!inside) return res.status(403).json({ error: 'Access denied' });
+  if (fullPath === path.resolve(ws)) return res.status(400).json({ error: 'Não é permitido apagar a raiz do projeto' });
   if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Not found' });
   const stat = fs.statSync(fullPath);
   if (stat.isDirectory()) fs.rmSync(fullPath, { recursive: true });
@@ -478,9 +489,9 @@ app.delete('/api/files/*', requireAuth, (req, res) => {
 app.put('/api/files/rename', requireAuth, (req, res) => {
   const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const { oldPath, newPath } = req.body;
-  const fullOld = path.resolve(ws, oldPath);
-  const fullNew = path.resolve(ws, newPath);
-  if (!fullOld.startsWith(ws) || !fullNew.startsWith(ws)) return res.status(403).json({ error: 'Access denied' });
+  const { resolved: fullOld, inside: inOld } = safeResolve(ws, oldPath);
+  const { resolved: fullNew, inside: inNew } = safeResolve(ws, newPath);
+  if (!inOld || !inNew) return res.status(403).json({ error: 'Access denied' });
   if (!fs.existsSync(fullOld)) return res.status(404).json({ error: 'Source not found' });
   const dir = path.dirname(fullNew);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -936,7 +947,10 @@ io.on('connection', (socket) => {
 // ==========================================================================
 // Iniciar Servidor
 // ==========================================================================
-server.listen(PORT, '0.0.0.0', () => {
+// Por segurança, escuta só em localhost por padrão. Para expor na rede,
+// defina BIND_HOST=0.0.0.0 no .env (entenda os riscos: run_command roda no host).
+const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
+server.listen(PORT, BIND_HOST, () => {
   const os = require('os');
   const localIP = Object.values(os.networkInterfaces()).flat().find(i => i.family === 'IPv4' && !i.internal)?.address || 'localhost';
   console.log(`\n🚀 IDE Agêntica SaaS rodando em:`);

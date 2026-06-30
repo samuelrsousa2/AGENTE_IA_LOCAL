@@ -11,6 +11,19 @@ const COMMAND_TIMEOUT = 120000;     // 2 min para npm install, compilações etc
 const BACKGROUND_TIMEOUT = 8000;    // 8s para servidores em background
 
 // ==========================================================================
+// Segurança: resolve um caminho garantindo que fica DENTRO do workspace.
+// Corrige o bug do startsWith (ex: /user1 vs /user1-malicioso) usando
+// path.relative — se o relativo começar com ".." está fora.
+// ==========================================================================
+function safeResolve(workspacePath, target) {
+  const base = path.resolve(workspacePath);
+  const resolved = path.resolve(base, target || '.');
+  const rel = path.relative(base, resolved);
+  const inside = resolved === base || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  return { resolved, inside };
+}
+
+// ==========================================================================
 // Definição das Ferramentas — Conjunto Completo para Autonomia Total
 // ==========================================================================
 const TOOLS_DEFINITION = [
@@ -460,8 +473,8 @@ async function executeTool(toolName, args, workspacePath) {
 }
 
 function toolCreateFile(args, workspacePath) {
-  const filePath = path.resolve(workspacePath, args.path);
-  if (!filePath.startsWith(workspacePath)) return { success: false, result: 'Path outside workspace' };
+  const { resolved: filePath, inside } = safeResolve(workspacePath, args.path);
+  if (!inside) return { success: false, result: 'Path outside workspace' };
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(filePath, args.content, 'utf8');
@@ -470,8 +483,8 @@ function toolCreateFile(args, workspacePath) {
 }
 
 function toolReadFile(args, workspacePath) {
-  const filePath = path.resolve(workspacePath, args.path);
-  if (!filePath.startsWith(workspacePath)) return { success: false, result: 'Path outside workspace' };
+  const { resolved: filePath, inside } = safeResolve(workspacePath, args.path);
+  if (!inside) return { success: false, result: 'Path outside workspace' };
   if (!fs.existsSync(filePath)) return { success: false, result: `File not found: ${args.path}` };
   const content = fs.readFileSync(filePath, 'utf8');
   if (content.length > 12000) {
@@ -481,8 +494,8 @@ function toolReadFile(args, workspacePath) {
 }
 
 function toolEditFile(args, workspacePath) {
-  const filePath = path.resolve(workspacePath, args.path);
-  if (!filePath.startsWith(workspacePath)) return { success: false, result: 'Path outside workspace' };
+  const { resolved: filePath, inside } = safeResolve(workspacePath, args.path);
+  if (!inside) return { success: false, result: 'Path outside workspace' };
   if (!fs.existsSync(filePath)) return { success: false, result: `File not found: ${args.path}` };
   let content = fs.readFileSync(filePath, 'utf8');
   if (!content.includes(args.old_text)) {
@@ -500,17 +513,38 @@ function toolEditFile(args, workspacePath) {
   return { success: true, result: `✅ Edited: ${args.path}` };
 }
 
+// Comandos perigosos a nível de host — bloqueados mesmo após aprovação.
+// Protege a máquina do usuário contra destruição acidental/maliciosa.
+const DANGEROUS_COMMAND_RE = /(^|[\s;&|])(rm\s+-rf?\s+[\/~]|rmdir\s+\/s|del\s+\/[sfq]|format\s|mkfs|dd\s+if=|:\(\)\s*\{|shutdown|reboot|halt|poweroff|reg\s+delete|rd\s+\/s|takeown|icacls\s+[\/cC]:|>\s*\/dev\/sd|curl[^\n|]*\|\s*(ba)?sh|wget[^\n|]*\|\s*(ba)?sh)/i;
+
+// Resolve um shell CONFIÁVEL. Em alguns ambientes Windows o %ComSpec% é
+// substituído por um wrapper que imprime o banner do cmd e quebra a saída
+// dos comandos. Por isso forçamos o cmd.exe real do sistema.
+function resolveShell() {
+  if (process.platform === 'win32') {
+    const sysCmd = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
+    if (fs.existsSync(sysCmd)) return sysCmd;
+    return true;
+  }
+  return true;
+}
+const SAFE_SHELL = resolveShell();
+
 function toolRunCommand(args, workspacePath) {
   const timeout = (args.timeout_seconds || 120) * 1000;
+  const cmd = String(args.command || '');
+  if (DANGEROUS_COMMAND_RE.test(cmd)) {
+    return { success: false, result: `🚫 Comando bloqueado por segurança (operação destrutiva de sistema detectada): ${cmd}` };
+  }
   try {
     const output = execSync(args.command, {
       cwd: workspacePath,
       timeout: Math.min(timeout, COMMAND_TIMEOUT),
       encoding: 'utf8',
       maxBuffer: 4 * 1024 * 1024,
-      shell: true,
+      shell: SAFE_SHELL,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' }
+      env: { ...process.env, ComSpec: typeof SAFE_SHELL === 'string' ? SAFE_SHELL : process.env.ComSpec, FORCE_COLOR: '0', NO_COLOR: '1' }
     });
     const result = (output || '(completed with no output)').trim();
     // Truncate long outputs but keep the end (errors are at the end)
@@ -564,15 +598,15 @@ async function toolRunBackground(args, workspacePath) {
 
   // Also try to free the port (cross-platform: kill-port funciona em Win/Linux/Mac)
   try {
-    execSync(`npx --yes kill-port ${port}`, { cwd: workspacePath, timeout: 8000, shell: true, stdio: 'ignore' });
+    execSync(`npx --yes kill-port ${port}`, { cwd: workspacePath, timeout: 8000, shell: SAFE_SHELL, stdio: 'ignore' });
   } catch (e) {}
 
   const proc = spawn(args.command, [], {
     cwd: workspacePath,
-    shell: true,
+    shell: SAFE_SHELL,
     detached: false,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PORT: String(port), NODE_ENV: 'development' }
+    env: { ...process.env, ComSpec: typeof SAFE_SHELL === 'string' ? SAFE_SHELL : process.env.ComSpec, PORT: String(port), NODE_ENV: 'development' }
   });
 
   backgroundProcesses.set(port, proc);
@@ -603,15 +637,26 @@ async function toolRunBackground(args, workspacePath) {
     };
   }
 
+  // ✅ VALIDAÇÃO AUTOMÁTICA: tenta fazer um HTTP GET no servidor para
+  // confirmar que ele realmente responde (não só "subiu o processo").
+  let healthNote = '';
+  try {
+    const ctrl = AbortSignal.timeout(3000);
+    const resp = await fetch(`http://127.0.0.1:${port}/`, { signal: ctrl });
+    healthNote = `\n✅ Validação: servidor respondeu HTTP ${resp.status} em http://localhost:${port}/`;
+  } catch (e) {
+    healthNote = `\n⚠️ Validação: o processo está rodando, mas a porta ${port} ainda não respondeu HTTP (${e.message}). Pode estar inicializando ou usar outra rota.`;
+  }
+
   return {
     success: true,
-    result: `✅ Server started on port ${port}\n🔗 URL: http://localhost:${port}\n\nStartup output:\n${output.slice(-500) || '(no output yet — server may still be starting)'}`
+    result: `✅ Server started on port ${port}\n🔗 URL: http://localhost:${port}${healthNote}\n\nStartup output:\n${output.slice(-500) || '(no output yet — server may still be starting)'}`
   };
 }
 
 function toolListFiles(args, workspacePath) {
-  const dirPath = path.resolve(workspacePath, args.directory || '.');
-  if (!dirPath.startsWith(workspacePath)) return { success: false, result: 'Path outside workspace' };
+  const { resolved: dirPath, inside } = safeResolve(workspacePath, args.directory || '.');
+  if (!inside) return { success: false, result: 'Path outside workspace' };
   if (!fs.existsSync(dirPath)) return { success: false, result: `Directory not found: ${args.directory}` };
 
   const result = [];
@@ -639,8 +684,9 @@ function toolZipProject(args, workspacePath) {
 }
 
 function toolDeleteFile(args, workspacePath) {
-  const filePath = path.resolve(workspacePath, args.path);
-  if (!filePath.startsWith(workspacePath)) return { success: false, result: 'Path outside workspace' };
+  const { resolved: filePath, inside } = safeResolve(workspacePath, args.path);
+  if (!inside) return { success: false, result: 'Path outside workspace' };
+  if (filePath === path.resolve(workspacePath)) return { success: false, result: 'Não é permitido apagar a raiz do workspace' };
   if (!fs.existsSync(filePath)) return { success: false, result: `Not found: ${args.path}` };
   const stat = fs.statSync(filePath);
   if (stat.isDirectory()) fs.rmSync(filePath, { recursive: true });
@@ -649,8 +695,8 @@ function toolDeleteFile(args, workspacePath) {
 }
 
 function toolSearchFiles(args, workspacePath) {
-  const dirPath = path.resolve(workspacePath, args.directory || '.');
-  if (!dirPath.startsWith(workspacePath)) return { success: false, result: 'Path outside workspace' };
+  const { resolved: dirPath, inside } = safeResolve(workspacePath, args.directory || '.');
+  if (!inside) return { success: false, result: 'Path outside workspace' };
   const results = [];
   function search(dir) {
     if (results.length > 40) return;
@@ -773,7 +819,24 @@ async function toolWebSearch(args) {
     }
 
     if (results.length === 0) {
-      return { success: true, result: `No results found for "${query}". Try a different query.` };
+      // Fallback: DuckDuckGo Instant Answer API (JSON) quando o HTML muda/bloqueia
+      try {
+        const apiUrl = `https://api.duckduckgo.com/?q=${encodedQuery}&format=json&no_html=1&skip_disambig=1`;
+        const r = await fetch(apiUrl, { signal: AbortSignal.timeout(8000) });
+        if (r.ok) {
+          const j = await r.json();
+          const fb = [];
+          if (j.AbstractText) fb.push(`• ${j.AbstractText}${j.AbstractURL ? `\n   URL: ${j.AbstractURL}` : ''}`);
+          for (const t of (j.RelatedTopics || [])) {
+            if (t.Text && t.FirstURL) fb.push(`• ${t.Text}\n   URL: ${t.FirstURL}`);
+            if (fb.length >= 6) break;
+          }
+          if (fb.length > 0) {
+            return { success: true, result: `🔍 Resultados para "${query}" (fallback):\n\n${fb.join('\n')}` };
+          }
+        }
+      } catch (e2) { /* segue para a mensagem de "no results" */ }
+      return { success: true, result: `Nenhum resultado encontrado para "${query}". Tente outra consulta.` };
     }
 
     return { success: true, result: `🔍 Search results for "${query}":\n\n${results.join('\n')}` };
