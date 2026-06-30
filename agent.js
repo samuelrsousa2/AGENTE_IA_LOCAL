@@ -1133,40 +1133,43 @@ Execute AGORA todo o restante do pipeline automaticamente, sem parar:
   // ── Detector de fase do pipeline (a partir do texto/emoji do agente) ──
   let lastPhase = null;
   let awaitingApproval = false;
+  // Ordem canônica do pipeline (índice = posição). Nunca volta atrás.
+  const PHASE_ORDER = ['planning','approval','execution','build','test','run','validate','selfreview','deliver'];
+  let maxPhaseIdx = -1; // maior fase já emitida (impede regressão)
   // Approval tem prioridade: se o agente pede aprovação, trava nessa fase.
   const approvalRe = /✋|aprova(r|ção|do)|aguardando aprova|posso prosseguir|responda ['"]?aprovado/i;
   const phaseMatchers = [
     { id: 'planning',   re: /📋|planejamento/i },
     { id: 'execution',  re: /⚙️|execução|criando (os )?arquivos/i },
-    { id: 'build',      re: /🔨|\bbuild\b|compilando|compilação/i },
+    { id: 'build',      re: /🔨|\bbuild\b|compilando|compilação|instalando depend/i },
     { id: 'test',       re: /🧪|\btestes?\b|rodando teste/i },
-    { id: 'run',        re: /▶️|iniciando (o )?servidor|servidor (started|iniciad)/i },
+    { id: 'run',        re: /▶️|iniciando (o )?servidor|servidor (started|iniciad)|executar:/i },
     { id: 'validate',   re: /✅|validar|validação|verificando.*(endpoint|health)/i },
-    { id: 'selfreview', re: /🔍|autoavalia|auto-avalia/i },
-    { id: 'deliver',    re: /🎁|entregue|concluíd[oa]/i }
+    { id: 'selfreview', re: /🔍|autoavalia|auto-avalia|autoavaliação/i },
+    { id: 'deliver',    re: /🎁|entregue|entregar|concluíd[oa]/i }
   ];
+  function gotoPhase(id) {
+    const idx = PHASE_ORDER.indexOf(id);
+    if (idx === -1 || idx <= maxPhaseIdx) return; // só avança, nunca regride
+    maxPhaseIdx = idx;
+    lastPhase = id;
+    emitPhase(socket, id, '');
+  }
+  // Detecta TODAS as fases presentes no texto e emite, em ordem, as ainda não vistas.
   function detectAndEmitPhase(text) {
     if (!text) return;
-    // Approval vence tudo enquanto a frase de aprovação estiver presente
     if (approvalRe.test(text)) {
       awaitingApproval = true;
-      if (lastPhase !== 'approval') { lastPhase = 'approval'; emitPhase(socket, 'approval', ''); }
+      gotoPhase('approval');
       return;
     }
-    for (let i = phaseMatchers.length - 1; i >= 0; i--) {
-      if (phaseMatchers[i].re.test(text)) {
-        if (lastPhase !== phaseMatchers[i].id) {
-          lastPhase = phaseMatchers[i].id;
-          emitPhase(socket, phaseMatchers[i].id, '');
-        }
-        return;
-      }
+    // Percorre os matchers na ordem do pipeline e emite cada fase encontrada
+    for (const m of phaseMatchers) {
+      if (m.re.test(text)) gotoPhase(m.id);
     }
   }
   function emitPhaseOnce(phaseId) {
-    if (lastPhase === phaseId) return;
-    lastPhase = phaseId;
-    emitPhase(socket, phaseId, '');
+    gotoPhase(phaseId);
   }
 
   // Se entrou já aprovado, marca a fase de execução de cara
@@ -1305,7 +1308,12 @@ Responda ou execute o que foi pedido. Se era uma pergunta, responda brevemente. 
           // Mapeia ferramenta → fase do pipeline
           if (toolName === 'create_file' || toolName === 'edit_file' || toolName === 'delete_file') {
             const p = (toolArgs.path || '').toLowerCase();
-            if (p === 'plano.md') { emitPhaseOnce('planning'); planCreated = true; }
+            if (p === 'plano.md' || p.endsWith('/plano.md')) {
+              emitPhaseOnce('planning');
+              planCreated = true;
+              // Em modo planejamento, após criar o plano fica aguardando aprovação
+              if (!planApproved) { awaitingApproval = true; emitPhaseOnce('approval'); }
+            }
             else if (/test/.test(p)) emitPhaseOnce('test');
             else emitPhaseOnce('execution');
           } else if (toolName === 'run_command') {
