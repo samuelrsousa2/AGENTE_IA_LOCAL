@@ -10,3 +10,5 @@ data/
 *.zip
 ssl/
 auth/google.js
+.node-lts/
+start.bat

@@ -82,6 +82,29 @@ const queries = {
     return bcrypt.compareSync(password, user.password);
   },
 
+  // Google OAuth: cria ou atualiza usuário a partir do perfil do Google
+  upsertGoogleUser(profile) {
+    const email = (profile.emails && profile.emails[0] && profile.emails[0].value || '').toLowerCase();
+    const name = profile.displayName || email.split('@')[0] || 'Usuário Google';
+    const avatar = (profile.photos && profile.photos[0] && profile.photos[0].value) || null;
+    if (!email) throw new Error('Perfil do Google sem email');
+
+    const existing = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    if (existing) {
+      db.prepare('UPDATE users SET name = ?, avatar = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(name, avatar, existing.id);
+      return db.prepare('SELECT * FROM users WHERE id = ?').get(existing.id);
+    }
+    // Cria novo usuário (senha aleatória, já que o login é via Google)
+    const id = generateId();
+    const randomPass = bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), 10);
+    db.prepare(`
+      INSERT INTO users (id, email, password, name, avatar, role, plan)
+      VALUES (?, ?, ?, ?, ?, 'user', 'starter')
+    `).run(id, email, randomPass, name, avatar);
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  },
+
   // Admin: criar usuário
   createUser({ email, password, name, role = 'user', plan = 'starter' }) {
     const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);

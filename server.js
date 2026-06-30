@@ -38,6 +38,22 @@ function safeResolve(baseDir, target) {
   return { resolved, inside };
 }
 
+// Shell confiável: em alguns ambientes Windows o %ComSpec% é um wrapper que
+// quebra a saída dos comandos. Forçamos o cmd.exe real do sistema.
+function resolveShell() {
+  if (process.platform === 'win32') {
+    const sysCmd = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
+    if (fs.existsSync(sysCmd)) return sysCmd;
+  }
+  return true;
+}
+const SAFE_SHELL = resolveShell();
+
+// Rejeita metacaracteres de shell que permitiriam injeção de comandos.
+function hasShellInjection(str) {
+  return /[;&|`$<>\n\r\\]|\$\(|\|\||&&/.test(String(str || ''));
+}
+
 // Retorna workspace do usuário e projeto específico (cria se não existir)
 function getUserWorkspace(userId, projectId = 'default') {
   projectId = projectId.replace(/[^a-zA-Z0-9_\-]/g, '');
@@ -556,9 +572,9 @@ function execGit(args, cwd) {
       cwd,
       encoding: 'utf8',
       timeout: 30000,
-      shell: true,
+      shell: SAFE_SHELL,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+      env: { ...process.env, ComSpec: typeof SAFE_SHELL === 'string' ? SAFE_SHELL : process.env.ComSpec, GIT_TERMINAL_PROMPT: '0' }
     });
     return { success: true, output: result.trim() };
   } catch (e) {
@@ -649,6 +665,7 @@ app.post('/api/git/init', requireAuth, (req, res) => {
 app.post('/api/git/add', requireAuth, (req, res) => {
   const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const { files } = req.body;
+  if (files && hasShellInjection(files)) return res.status(400).json({ error: 'Caracteres inválidos no campo files' });
   res.json(execGit(`add ${files || '.'}`, ws));
 });
 
@@ -656,7 +673,9 @@ app.post('/api/git/commit', requireAuth, (req, res) => {
   const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const { message } = req.body;
   if (!message) return res.status(400).json({ error: 'Message required' });
-  res.json(execGit(`commit -m "${message.replace(/"/g, '\\"')}"`, ws));
+  // Remove aspas duplas e crases/cifrão para evitar injeção via mensagem
+  const safeMsg = String(message).replace(/["`$\\]/g, '').replace(/[\r\n]+/g, ' ').slice(0, 500);
+  res.json(execGit(`commit -m "${safeMsg}"`, ws));
 });
 
 app.post('/api/git/push', requireAuth, (req, res) => {
@@ -691,6 +710,10 @@ app.post('/api/git/pull', requireAuth, (req, res) => {
 app.post('/api/git/remote', requireAuth, (req, res) => {
   const ws = getUserWorkspace(req.user.id, req.headers['x-project-id']);
   const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'URL required' });
+  if (hasShellInjection(url) || !/^(https?:\/\/|git@)/.test(url)) {
+    return res.status(400).json({ error: 'URL de remote inválida' });
+  }
   execGit('remote remove origin', ws);
   res.json(execGit(`remote add origin ${url}`, ws));
 });
@@ -700,6 +723,9 @@ app.post('/api/git/clone', requireAuth, (req, res) => {
   const config = readGitConfig(req.user.id);
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'URL required' });
+  if (hasShellInjection(url) || !/^(https?:\/\/|git@)/.test(url)) {
+    return res.status(400).json({ error: 'URL de clone inválida' });
+  }
   let cloneUrl = url;
   if (config.token && cloneUrl.startsWith('https://')) {
     cloneUrl = cloneUrl.replace('https://', `https://${config.username}:${config.token}@`);
@@ -780,10 +806,10 @@ app.post('/api/project/run', requireAuth, (req, res) => {
   const port = requestedPort || findFreeProjectPort(req.user.id);
   const proc = spawnProc(detected.cmd, [], {
     cwd: ws,
-    shell: true,
+    shell: SAFE_SHELL,
     detached: false,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PORT: String(port), NODE_ENV: 'development' }
+    env: { ...process.env, ComSpec: typeof SAFE_SHELL === 'string' ? SAFE_SHELL : process.env.ComSpec, PORT: String(port), NODE_ENV: 'development' }
   });
 
   let output = '';
