@@ -438,7 +438,19 @@ When asked for a complete app (any tech), create:
 
 ### 13. GENERATION LIMITS
 - Write your code or response ONCE. Do NOT repeat or loop the same code blocks.
-- When your task is done, STOP generating text immediately. Do NOT start over.`;
+- When your task is done, STOP generating text immediately. Do NOT start over.
+
+### 14. ORDEM OBRIGATÓRIA — NUNCA TESTE ANTES DE CRIAR
+- SEMPRE crie TODOS os arquivos com create_file ANTES de rodar qualquer comando.
+- NUNCA rode "node test.js", "npm test" ou "node arquivo.js" se o arquivo ainda NÃO foi criado.
+- NUNCA rode "npm install" se ainda não existe um package.json criado por você.
+- Se um comando falhar com "Cannot find module" ou "no such file", isso significa que você
+  PULOU a criação do arquivo: volte e crie o arquivo primeiro com create_file. NÃO repita o
+  mesmo comando que já falhou — corrija a causa.
+- NÃO chame a mesma ferramenta com os mesmos argumentos duas vezes seguidas. Se algo falhou,
+  mude a abordagem.
+- Sequência correta SEMPRE: create_file (todos) → run_command(npm install se houver package.json)
+  → run_command(testes) → run_background (servidor). Nunca fora dessa ordem.`;
 
 
 // ==========================================================================
@@ -1112,6 +1124,14 @@ Execute AGORA todo o restante do pipeline automaticamente, sem parar:
   const isSmallModel = /^(.*:)?(0\.5b|1b|1\.5b)$/i.test(model) || /1b-/i.test(model);
 
   let planCreated = false;
+  // Anti-loop: conta repetições de tool+args idênticos para impedir loops infinitos
+  const toolCallCounts = new Map();
+  function repeatGuard(toolName, toolArgs) {
+    const key = toolName + ':' + JSON.stringify(toolArgs || {});
+    const n = (toolCallCounts.get(key) || 0) + 1;
+    toolCallCounts.set(key, n);
+    return n;
+  }
   const APPROVAL_GATED_TOOLS = new Set(['run_command', 'run_background', 'delete_file', 'edit_file']);
   function isToolAllowedNow(toolName, toolArgs) {
     if (planApproved) return { allowed: true };
@@ -1220,11 +1240,23 @@ Responda ou execute o que foi pedido. Se era uma pergunta, responda brevemente. 
         requestBody.tools = TOOLS_DEFINITION;
       }
 
-      const response = await fetch(`${ollamaUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      });
+      let response;
+      try {
+        response = await fetch(`${ollamaUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+          // Timeout generoso: inferência em CPU pode ser lenta (modelos grandes)
+          signal: AbortSignal.timeout(300000)
+        });
+      } catch (netErr) {
+        const isAbort = netErr.name === 'TimeoutError' || /aborted|timeout/i.test(netErr.message);
+        const msg = isAbort
+          ? `O modelo demorou demais para responder (timeout). Tente um modelo menor (ex: qwen2.5:3b) ou aumente o num_ctx.`
+          : `Não foi possível conectar ao Ollama em ${ollamaUrl}. Verifique se o Ollama está rodando (ollama serve) e se a OLLAMA_URL no .env está correta.`;
+        socket.emit('agent-error', { error: msg, iteration: iterations });
+        return { content: `❌ ${msg}`, messages: messages.slice(1), iterations, error: true };
+      }
 
       if (!response.ok) {
         const errText = await response.text();
@@ -1299,6 +1331,13 @@ Responda ou execute o que foi pedido. Se era uma pergunta, responda brevemente. 
             socket.emit('agent-action', { tool: toolName, args: toolArgs, iteration: iterations, blocked: true });
             socket.emit('agent-action-result', { tool: toolName, success: false, result: `🚫 ${gate.reason}`, iteration: iterations, blocked: true });
             messages.push({ role: 'tool', content: `BLOQUEADO: ${gate.reason}` });
+            continue;
+          }
+
+          // ── ANTI-LOOP: bloqueia 3a+ repetição do mesmo tool+args ──
+          if (repeatGuard(toolName, toolArgs) > 2) {
+            socket.emit('agent-action-result', { tool: toolName, success: false, result: `🔁 Bloqueado: você repetiu "${toolName}" com os mesmos argumentos várias vezes. Mude a abordagem — provavelmente falta criar um arquivo antes, ou o comando precisa ser diferente.`, iteration: iterations, blocked: true });
+            messages.push({ role: 'tool', content: `LOOP DETECTADO: pare de repetir "${toolName}". Crie os arquivos necessários primeiro ou mude a estratégia.` });
             continue;
           }
 
