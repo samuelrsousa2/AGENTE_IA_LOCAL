@@ -141,9 +141,11 @@ app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
-// Servir pricing.html
+// Servir pricing.html (se existir; senão redireciona para login)
 app.get('/pricing', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'pricing.html'));
+  const pricingPath = path.join(__dirname, 'public', 'pricing.html');
+  if (fs.existsSync(pricingPath)) return res.sendFile(pricingPath);
+  return res.redirect('/login');
 });
 
 // ==========================================================================
@@ -973,6 +975,29 @@ io.on('connection', (socket) => {
 // ==========================================================================
 // Iniciar Servidor
 // ==========================================================================
+// ==========================================================================
+// Tratamento de erros — evita que o servidor caia por um erro isolado
+// ==========================================================================
+// 404 para rotas de API não encontradas
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'Endpoint não encontrado' });
+});
+
+// Handler de erro global do Express
+app.use((err, req, res, next) => {
+  console.error('[ERRO]', err.message);
+  if (res.headersSent) return next(err);
+  res.status(500).json({ error: 'Erro interno do servidor' });
+});
+
+// Rede de segurança a nível de processo: loga em vez de derrubar o servidor
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err.message);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+
 // Por segurança, escuta só em localhost por padrão. Para expor na rede,
 // defina BIND_HOST=0.0.0.0 no .env (entenda os riscos: run_command roda no host).
 const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
