@@ -12,3 +12,14 @@ _boot.log
 _o.log
 _e.log
 data/.jwt-secret
+_*.js
+.r3
+.rfinal
+.real*
+.flow*
+.t
+.tt
+.sec-test*
+.test-ws*
+.approve-test
+.sec-test
