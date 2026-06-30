@@ -443,7 +443,7 @@ async function executeTool(toolName, args, workspacePath) {
       case 'read_file':      return toolReadFile(args, workspacePath);
       case 'edit_file':      return toolEditFile(args, workspacePath);
       case 'run_command':    return toolRunCommand(args, workspacePath);
-      case 'run_background': return toolRunBackground(args, workspacePath);
+      case 'run_background': return await toolRunBackground(args, workspacePath);
       case 'list_files':     return toolListFiles(args, workspacePath);
       case 'delete_file':    return toolDeleteFile(args, workspacePath);
       case 'search_files':   return toolSearchFiles(args, workspacePath);
@@ -549,7 +549,9 @@ function autoInstallAndRun(workspacePath, socket, iteration) {
   }
 }
 
-function toolRunBackground(args, workspacePath) {
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function toolRunBackground(args, workspacePath) {
   const { spawn } = require('child_process');
   const port = args.port || 3001;
   const waitMs = (args.wait_seconds || 4) * 1000;
@@ -560,9 +562,9 @@ function toolRunBackground(args, workspacePath) {
     backgroundProcesses.delete(port);
   }
 
-  // Also try to free the port
+  // Also try to free the port (cross-platform: kill-port funciona em Win/Linux/Mac)
   try {
-    execSync(`npx kill-port ${port} 2>/dev/null || true`, { cwd: workspacePath, timeout: 5000, shell: true });
+    execSync(`npx --yes kill-port ${port}`, { cwd: workspacePath, timeout: 8000, shell: true, stdio: 'ignore' });
   } catch (e) {}
 
   const proc = spawn(args.command, [], {
@@ -580,13 +582,11 @@ function toolRunBackground(args, workspacePath) {
   proc.stderr?.on('data', d => { output += d.toString(); });
   proc.on('error', e => { output += `\nProcess error: ${e.message}`; });
 
-  // Wait a bit for the server to start
+  // Espera NÃO-BLOQUEANTE: usa await sleep em vez de busy-wait,
+  // assim o event loop do Node continua livre para os outros usuários.
   const start = Date.now();
   while (Date.now() - start < waitMs) {
-    // Busy-wait (this runs in the tool executor context)
-    const now = Date.now();
-    while (Date.now() - now < 100) {} // 100ms sleep simulation
-    // Check if process died
+    await sleep(150);
     if (proc.exitCode !== null) {
       return {
         success: false,
@@ -852,9 +852,11 @@ async function toolWebRead(args) {
 // ==========================================================================
 // Fallback: Parse código E comandos de modelos pequenos (1B)
 // ==========================================================================
-function parseCodeBlocksFromResponse(content, workspacePath, socket, iteration = 0) {
+function parseCodeBlocksFromResponse(content, workspacePath, socket, iteration = 0, planApproved = true) {
   let filesCreated = 0;
   const usedBlocks = new Set();
+  // Gate: antes da aprovação só permite criar plano.md e nenhum comando
+  const fileAllowed = (name) => planApproved || /(^|\/)plano\.md$/i.test(name || '');
 
   // Strategy 1: Explicit file paths in fence ```path/file.ext
   const explicitFileRegex = /```(\S+\/?\S+\.\w{1,5})\n([\s\S]*?)```/g;
@@ -867,6 +869,7 @@ function parseCodeBlocksFromResponse(content, workspacePath, socket, iteration =
   while ((match = explicitFileRegex.exec(content)) !== null) {
     const filePath = match[1];
     if (langOnly.has(filePath.toLowerCase())) continue;
+    if (!fileAllowed(filePath)) continue; // gate de aprovação
     const fileContent = match[2];
     socket.emit('agent-action', { tool: 'create_file', args: { path: filePath }, iteration });
     const result = toolCreateFile({ path: filePath, content: fileContent }, workspacePath);
@@ -909,6 +912,7 @@ function parseCodeBlocksFromResponse(content, workspacePath, socket, iteration =
       fileName = `${path.basename(fileName, e)}_${filesCreated}${e}`;
     }
 
+    if (!fileAllowed(fileName)) continue; // gate de aprovação
     socket.emit('agent-action', { tool: 'create_file', args: { path: fileName }, iteration });
     const result = toolCreateFile({ path: fileName, content: fileContent }, workspacePath);
     socket.emit('agent-action-result', { tool: 'create_file', success: result.success, result: result.result, iteration });
@@ -928,7 +932,8 @@ function parseCodeBlocksFromResponse(content, workspacePath, socket, iteration =
   const dangerousCommands = /rm\s+-rf|del\s|format|shutdown|reboot|dd\s+if/i;
 
   const executedCmds = new Set();
-  for (const pattern of cmdPatterns) {
+  // Antes da aprovação, NÃO auto-executa comandos
+  for (const pattern of (planApproved ? cmdPatterns : [])) {
     let cmdMatch;
     pattern.lastIndex = 0;
     while ((cmdMatch = pattern.exec(content)) !== null) {
@@ -949,7 +954,7 @@ function parseCodeBlocksFromResponse(content, workspacePath, socket, iteration =
   }
 
   // ─── AUTO-INSTALL: se criou package.json e não tem node_modules ──────────
-  if (filesCreated > 0) {
+  if (filesCreated > 0 && planApproved) {
     const pkgPath = path.join(workspacePath, 'package.json');
     const nmPath = path.join(workspacePath, 'node_modules');
     if (fs.existsSync(pkgPath) && !fs.existsSync(nmPath)) {
@@ -1013,6 +1018,14 @@ async function runAgentLoop(ollamaUrl, model, chatMessages, workspacePath, socke
     }
   } catch (e) {}
 
+  // ── Gate de aprovação (enforcement no servidor, não depende do LLM) ──
+  // Em modo planejamento, ferramentas destrutivas ficam BLOQUEADAS até o
+  // usuário aprovar. A aprovação chega como uma nova mensagem (novo loop).
+  const approvalWordRe = /\b(aprovad[oa]|aprovo|pode (prosseguir|continuar|seguir)|sim,? pode|prossiga|continuar?|go ahead|approved)\b/i;
+  const lastUserMsg = [...chatMessages].reverse().find(m => m.role === 'user');
+  const userAlreadyApproved = planningMode && lastUserMsg && approvalWordRe.test(lastUserMsg.content || '');
+  let planApproved = !planningMode || userAlreadyApproved;  // liberado se não há planning OU já aprovado
+
   const planningPrompt = planningMode ? `\n\n## ✋ MODO DE PLANEJAMENTO/APROVAÇÃO ATIVADO
 O usuário quer aprovar o plano ANTES da execução. Siga o início do pipeline:
 1. 📋 PLANEJAMENTO: Explore o workspace com list_files/read_file para entender o contexto.
@@ -1021,13 +1034,38 @@ O usuário quer aprovar o plano ANTES da execução. Siga o início do pipeline:
 4. CRÍTICO: NÃO crie arquivos do projeto, nem use edit_file/delete_file/run_command/run_background até o usuário responder "aprovado" (ou equivalente).
 5. Assim que aprovado, execute o RESTANTE DO PIPELINE inteiro automaticamente, sem parar de novo: ⚙️ Execução → 🔨 Build (corrigir e rebuildar até passar) → 🧪 Testes (corrigir e re-testar até passar) → ▶️ Executar → ✅ Validar → 🔍 Autoavaliação → 🎁 Entregar.` : '';
 
+  // Se o usuário acabou de aprovar, instrui o agente a executar o pipeline restante
+  const approvedPrompt = userAlreadyApproved ? `\n\n## ✅ PLANO APROVADO PELO USUÁRIO
+O usuário APROVOU o plano (veja o plano.md). NÃO replaneje nem peça aprovação de novo.
+Execute AGORA todo o restante do pipeline automaticamente, sem parar:
+⚙️ Execução → 🔨 Build (corrigir→build até passar) → 🧪 Testes (corrigir→testar até passar) → ▶️ Executar → ✅ Validar → 🔍 Autoavaliação → 🎁 Entregar.` : '';
+
   const messages = [
-    { role: 'system', content: AGENT_SYSTEM_PROMPT + contextNote + planningPrompt },
+    { role: 'system', content: AGENT_SYSTEM_PROMPT + contextNote + planningPrompt + approvedPrompt },
     ...chatMessages
   ];
 
   let iterations = 0;
   const isSmallModel = /^(.*:)?(0\.5b|1b|1\.5b)$/i.test(model) || /1b-/i.test(model);
+
+  let planCreated = false;
+  const APPROVAL_GATED_TOOLS = new Set(['run_command', 'run_background', 'delete_file', 'edit_file']);
+  function isToolAllowedNow(toolName, toolArgs) {
+    if (planApproved) return { allowed: true };
+    // Antes da aprovação: permite explorar e criar SOMENTE o plano.md
+    if (['list_files', 'read_file', 'search_files', 'web_search', 'web_read', 'list_mcp_tools'].includes(toolName)) {
+      return { allowed: true };
+    }
+    if (toolName === 'create_file') {
+      const p = (toolArgs.path || '').toLowerCase();
+      if (p === 'plano.md' || p.endsWith('/plano.md')) return { allowed: true };
+      return { allowed: false, reason: 'Antes da aprovação você só pode criar o arquivo plano.md. Aguarde o usuário responder "aprovado" para criar os demais arquivos.' };
+    }
+    if (APPROVAL_GATED_TOOLS.has(toolName)) {
+      return { allowed: false, reason: `A ferramenta "${toolName}" está BLOQUEADA até o usuário aprovar o plano. Apresente o plano.md e peça aprovação no chat.` };
+    }
+    return { allowed: true };
+  }
 
   // ── Detector de fase do pipeline (a partir do texto/emoji do agente) ──
   let lastPhase = null;
@@ -1068,6 +1106,9 @@ O usuário quer aprovar o plano ANTES da execução. Siga o início do pipeline:
     emitPhase(socket, phaseId, '');
   }
 
+  // Se entrou já aprovado, marca a fase de execução de cara
+  if (userAlreadyApproved) emitPhaseOnce('execution');
+
   while (iterations < MAX_ITERATIONS) {
     iterations++;
 
@@ -1075,8 +1116,9 @@ O usuário quer aprovar o plano ANTES da execução. Siga o início do pipeline:
     if (getNextInterrupt) {
       const interruptMsg = getNextInterrupt();
       if (interruptMsg) {
-        // Se o usuário aprovou, libera o pipeline para continuar
+        // Se o usuário aprovou, LIBERA o gate e o pipeline continua
         if (/aprovad|aprovo|pode (prosseguir|continuar|seguir)|sim,? pode|✅/i.test(interruptMsg)) {
+          planApproved = true;
           awaitingApproval = false;
           emitPhaseOnce('execution');
         }
@@ -1183,13 +1225,24 @@ Responda ou execute o que foi pedido. Se era uma pergunta, responda brevemente. 
               : (toolCall.function.arguments || {});
           } catch { toolArgs = {}; }
 
+          // ── GATE DE APROVAÇÃO (servidor) ──
+          const gate = isToolAllowedNow(toolName, toolArgs);
+          if (!gate.allowed) {
+            awaitingApproval = true;
+            emitPhaseOnce('approval');
+            socket.emit('agent-action', { tool: toolName, args: toolArgs, iteration: iterations, blocked: true });
+            socket.emit('agent-action-result', { tool: toolName, success: false, result: `🚫 ${gate.reason}`, iteration: iterations, blocked: true });
+            messages.push({ role: 'tool', content: `BLOQUEADO: ${gate.reason}` });
+            continue;
+          }
+
           // Emit action to frontend
           socket.emit('agent-action', { tool: toolName, args: toolArgs, iteration: iterations });
 
           // Mapeia ferramenta → fase do pipeline
           if (toolName === 'create_file' || toolName === 'edit_file' || toolName === 'delete_file') {
             const p = (toolArgs.path || '').toLowerCase();
-            if (p === 'plano.md') emitPhaseOnce('planning');
+            if (p === 'plano.md') { emitPhaseOnce('planning'); planCreated = true; }
             else if (/test/.test(p)) emitPhaseOnce('test');
             else emitPhaseOnce('execution');
           } else if (toolName === 'run_command') {
@@ -1237,6 +1290,14 @@ Responda ou execute o que foi pedido. Se era uma pergunta, responda brevemente. 
         try {
           const toolName = match[1];
           const toolArgs = JSON.parse(match[2]);
+          const gate = isToolAllowedNow(toolName, toolArgs);
+          if (!gate.allowed) {
+            awaitingApproval = true;
+            emitPhaseOnce('approval');
+            socket.emit('agent-action-result', { tool: toolName, success: false, result: `🚫 ${gate.reason}`, iteration: iterations, blocked: true });
+            messages.push({ role: 'tool', content: `BLOQUEADO: ${gate.reason}` });
+            continue;
+          }
           socket.emit('agent-action', { tool: toolName, args: toolArgs, iteration: iterations });
           const toolResult = await executeTool(toolName, toolArgs, workspacePath);
           const resultPreview = toolResult.result.length > 1500 ? '...(truncated)\n' + toolResult.result.slice(-1500) : toolResult.result;
@@ -1256,7 +1317,7 @@ Responda ou execute o que foi pedido. Se era uma pergunta, responda brevemente. 
       // Aplica para modelos pequenos (1B) E para qualquer modelo que retornou
       // código em blocos sem usar tool calls
       if (finalContent && finalContent.includes('```')) {
-        const filesCreated = parseCodeBlocksFromResponse(finalContent, workspacePath, socket, iterations);
+        const filesCreated = parseCodeBlocksFromResponse(finalContent, workspacePath, socket, iterations, planApproved);
         if (filesCreated > 0) {
           let cleanContent = finalContent
             .replace(/```[\w./\-]*\n[\s\S]*?```/g, '')

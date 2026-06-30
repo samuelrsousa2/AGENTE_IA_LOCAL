@@ -1,0 +1,15 @@
+Iniciando IDE Agentica com Node:
+v22.13.1
+◇ injected env (7) from .env // tip: ⌘ override existing { override: true }
+
+🚀 IDE Agêntica SaaS rodando em:
+   Local:   http://localhost:3000
+   Rede:    http://192.168.1.8:3000
+   Ollama:  http://127.0.0.1:11434
+   Admin:   http://localhost:3000/admin
+   Login:   http://localhost:3000/login
+
+🔌 Inicializando MCP Manager...
+   4 servidor(es) configurado(s), 0 habilitado(s)
+   ℹ️  Nenhum servidor MCP habilitado. Configure em: Admin → MCP Servers
+
